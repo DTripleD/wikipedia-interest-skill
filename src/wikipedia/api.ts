@@ -13,11 +13,16 @@
  * - Titles are case-sensitive; spaces are equivalent to underscores; "/" must be encoded.
  * - Days are sometimes omitted from the response (observed on low-traffic articles).
  *   This client does NOT fill gaps; normalization happens in a later layer.
- * - Requests without a User-Agent get 403. Unauthenticated clients with a compliant
- *   User-Agent are limited to 200 req/min; 429/503 responses usually carry Retry-After.
+ * - Requests without a User-Agent get 403. Retries and error mapping live in http.ts.
  */
-import { getUserAgent } from '../config.js';
 import { fromApiTimestamp, isIsoDate, toApiDate, todayUtc } from '../dates.js';
+import { WikimediaApiError, readJson, requestWithRetry, type HttpOptions, type WikimediaErrorCode } from './http.js';
+
+export { wikipediaProject } from './languages.js';
+export { parseRetryAfter } from './http.js';
+/** Kept as an alias from Stage 2; all Wikimedia errors share one class. */
+export { WikimediaApiError as PageviewsApiError };
+export type PageviewsErrorCode = WikimediaErrorCode;
 
 export const PAGEVIEWS_API_BASE = 'https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article';
 
@@ -73,60 +78,12 @@ export interface PageviewsResult {
   warnings: string[];
 }
 
-export type PageviewsErrorCode =
-  | 'INVALID_INPUT'
-  | 'BAD_REQUEST'
-  | 'FORBIDDEN'
-  | 'RATE_LIMITED'
-  | 'SERVER_ERROR'
-  | 'HTTP_ERROR'
-  | 'TIMEOUT'
-  | 'NETWORK_ERROR'
-  | 'INVALID_RESPONSE';
-
-export class PageviewsApiError extends Error {
-  override readonly name = 'PageviewsApiError';
-  constructor(
-    readonly code: PageviewsErrorCode,
-    message: string,
-    readonly status?: number,
-  ) {
-    super(message);
-  }
-}
-
-export interface PageviewsClientOptions {
-  fetch?: typeof fetch;
-  userAgent?: string;
+export interface PageviewsClientOptions extends HttpOptions {
   baseUrl?: string;
-  /** Per-attempt timeout. Default 15 000 ms. */
-  timeoutMs?: number;
-  /** Retries after the first attempt for 429, 5xx, timeouts and network errors. Default 3. */
-  maxRetries?: number;
-  /** Exponential backoff base: delay = base * 2^retryIndex. Default 1 000 ms. */
-  baseDelayMs?: number;
-  /** Give up instead of waiting if the server asks for a longer Retry-After. Default 60 000 ms. */
-  maxRetryAfterMs?: number;
-  sleep?: (ms: number) => Promise<void>;
-  now?: () => Date;
 }
 
-const DEFAULT_TIMEOUT_MS = 15_000;
-
-/** Minimum wait after a 429 without Retry-After, per Wikimedia rate-limit guidance. */
-const MIN_RATE_LIMIT_DELAY_MS = 5_000;
-
-const LANGUAGE_CODE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+const SERVICE = 'Pageviews API';
 const PROJECT = /^([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.wikipedia$/;
-
-/** `pl` → `pl.wikipedia`. Throws INVALID_INPUT for malformed language codes. */
-export function wikipediaProject(language: string): string {
-  const code = language.trim().toLowerCase();
-  if (!LANGUAGE_CODE.test(code) || code.length > 20) {
-    throw new PageviewsApiError('INVALID_INPUT', `Invalid Wikipedia language code: "${language}".`);
-  }
-  return `${code}.wikipedia`;
-}
 
 /** Converts a title to the API form: trimmed, spaces → underscores. Case is preserved. */
 export function normalizeArticleTitle(title: string): string {
@@ -157,7 +114,7 @@ export async function fetchPageviews(
   const { resolved, warnings } = validateQuery(query, todayUtc(now()));
   const url = buildPageviewsUrl(resolved, options.baseUrl);
 
-  const response = await requestWithRetry(url, options);
+  const response = await requestWithRetry(url, options, { service: SERVICE, passStatuses: [404] });
 
   const base = {
     project: resolved.project,
@@ -174,7 +131,7 @@ export async function fetchPageviews(
     return { ...base, points: [], noData: true };
   }
 
-  const body = await readJson(response, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const body = await readJson(response, options, SERVICE);
   const points = parseItems(body, resolved.granularity);
   return { ...base, points, noData: false };
 }
@@ -184,7 +141,7 @@ function validateQuery(
   today: string,
 ): { resolved: Required<PageviewsQuery>; warnings: string[] } {
   const warnings: string[] = [];
-  const invalid = (msg: string) => new PageviewsApiError('INVALID_INPUT', msg);
+  const invalid = (msg: string) => new WikimediaApiError('INVALID_INPUT', msg);
 
   const project = query.project.trim().toLowerCase();
   if (!PROJECT.test(project)) {
@@ -241,109 +198,8 @@ function isLastDayOfMonth(isoDate: string): boolean {
   return new Date(Date.UTC(y, m, 0)).getUTCDate() === d;
 }
 
-async function requestWithRetry(url: string, options: PageviewsClientOptions): Promise<Response> {
-  const doFetch = options.fetch ?? globalThis.fetch;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const maxRetries = options.maxRetries ?? 3;
-  const baseDelayMs = options.baseDelayMs ?? 1_000;
-  const maxRetryAfterMs = options.maxRetryAfterMs ?? 60_000;
-  const headers = {
-    'User-Agent': options.userAgent ?? getUserAgent(),
-    Accept: 'application/json',
-  };
-
-  for (let attempt = 0; ; attempt++) {
-    const backoff = baseDelayMs * 2 ** attempt;
-    const canRetry = attempt < maxRetries;
-    let failure: PageviewsApiError;
-    let delay = backoff;
-
-    try {
-      const response = await doFetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
-      if (response.ok || response.status === 404) return response;
-
-      failure = await httpError(response);
-      if (response.status === 429 || response.status === 503) {
-        const retryAfter = parseRetryAfter(response.headers.get('retry-after'), options.now?.() ?? new Date());
-        if (retryAfter !== null && retryAfter > maxRetryAfterMs) {
-          throw new PageviewsApiError(
-            failure.code,
-            `${failure.message} Server asked to retry after ${Math.ceil(retryAfter / 1000)} s; giving up.`,
-            response.status,
-          );
-        }
-        delay = retryAfter ?? (response.status === 429 ? Math.max(MIN_RATE_LIMIT_DELAY_MS, backoff) : backoff);
-      } else if (response.status < 500) {
-        throw failure; // other 4xx: not retryable
-      }
-    } catch (err) {
-      if (err instanceof PageviewsApiError) throw err;
-      failure = toTransportError(err, timeoutMs);
-    }
-
-    if (!canRetry) throw failure;
-    await sleep(delay);
-  }
-}
-
-async function httpError(response: Response): Promise<PageviewsApiError> {
-  const detail = await readProblemDetail(response);
-  const suffix = detail ? `: ${detail}` : '';
-  const status = response.status;
-  if (status === 400) return new PageviewsApiError('BAD_REQUEST', `Pageviews API rejected the request (400)${suffix}`, status);
-  if (status === 403) {
-    return new PageviewsApiError('FORBIDDEN', `Pageviews API refused access (403); check the User-Agent/WIKI_SKILL_CONTACT${suffix}`, status);
-  }
-  if (status === 429) return new PageviewsApiError('RATE_LIMITED', `Pageviews API rate limit exceeded (429)${suffix}`, status);
-  if (status >= 500) return new PageviewsApiError('SERVER_ERROR', `Pageviews API server error (${status})${suffix}`, status);
-  return new PageviewsApiError('HTTP_ERROR', `Pageviews API returned HTTP ${status}${suffix}`, status);
-}
-
-async function readProblemDetail(response: Response): Promise<string | null> {
-  try {
-    const body: unknown = await response.json();
-    if (body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string') {
-      return body.detail;
-    }
-  } catch {
-    // Body is not JSON; the status code alone is reported.
-  }
-  return null;
-}
-
-function toTransportError(err: unknown, timeoutMs: number): PageviewsApiError {
-  if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-    return new PageviewsApiError('TIMEOUT', `Pageviews API did not respond within ${timeoutMs} ms.`);
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  return new PageviewsApiError('NETWORK_ERROR', `Network error calling Pageviews API: ${message}`);
-}
-
-/** Parses Retry-After (delta-seconds or HTTP-date) into milliseconds; null if absent/invalid. */
-export function parseRetryAfter(value: string | null, now: Date): number | null {
-  if (value === null) return null;
-  const trimmed = value.trim();
-  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
-  const at = Date.parse(trimmed);
-  if (Number.isNaN(at)) return null;
-  return Math.max(0, at - now.getTime());
-}
-
-async function readJson(response: Response, timeoutMs: number): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch (err) {
-    // The timeout signal also covers reading the body.
-    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw toTransportError(err, timeoutMs);
-    }
-    throw new PageviewsApiError('INVALID_RESPONSE', 'Pageviews API returned a body that is not valid JSON.', response.status);
-  }
-}
-
 function parseItems(body: unknown, granularity: Granularity): PageviewPoint[] {
-  const invalid = (msg: string) => new PageviewsApiError('INVALID_RESPONSE', `Unexpected Pageviews API response: ${msg}`);
+  const invalid = (msg: string) => new WikimediaApiError('INVALID_RESPONSE', `Unexpected ${SERVICE} response: ${msg}`);
 
   if (!body || typeof body !== 'object' || !('items' in body) || !Array.isArray(body.items)) {
     throw invalid('missing "items" array.');

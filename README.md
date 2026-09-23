@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–2 (project setup, Pageviews API client) are complete. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–3 (project setup, Pageviews API client, article resolver) are complete. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Architecture (summary)
@@ -30,7 +30,8 @@ src/
   config.ts       shared runtime config (User-Agent)
   dates.ts        UTC ISO-date helpers
   cli.ts          JSON-in/JSON-out command interface for the agent
-  wikipedia/      Pageviews API client (api.ts), article resolver (Stage 3)
+  wikipedia/      shared HTTP layer (http.ts), language editions (languages.ts),
+                  Pageviews API client (api.ts), topic → article resolver (resolver.ts)
   analysis/       trends, outliers, confidence                  (Stage 5–6)
   charts/         Vega-Lite → SVG                               (Stage 7)
   reports/        one-page PDF via PDFKit                       (Stage 8)
@@ -57,7 +58,7 @@ npm run build
 
 | Variable             | Purpose                                                                                                                                       |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WIKI_SKILL_CONTACT` | Contact info (email or URL) sent in the User-Agent, as the [Wikimedia User-Agent policy](https://meta.wikimedia.org/wiki/User-Agent_policy) requires. Set this before making real requests. |
+| `WIKI_SKILL_CONTACT` | Contact info (an email or a full URL) sent in the User-Agent, as the [Wikimedia User-Agent policy](https://meta.wikimedia.org/wiki/User-Agent_policy) requires. **Set this before making real requests.** Without real contact info, Wikimedia may treat the client as "unidentified" and limit it to 10 requests/minute (HTTP 429). |
 
 ## Usage
 
