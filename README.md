@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stage 1 (project setup) is complete. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–2 (project setup, Pageviews API client) are complete. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Architecture (summary)
@@ -28,12 +28,15 @@ The LLM never computes statistics from raw data.
 ```
 src/
   config.ts       shared runtime config (User-Agent)
+  dates.ts        UTC ISO-date helpers
   cli.ts          JSON-in/JSON-out command interface for the agent
-  wikipedia/      Pageviews API client, article resolver       (Stage 2–3)
+  wikipedia/      Pageviews API client (api.ts), article resolver (Stage 3)
   analysis/       trends, outliers, confidence                  (Stage 5–6)
   charts/         Vega-Lite → SVG                               (Stage 7)
   reports/        one-page PDF via PDFKit                       (Stage 8)
+docs/             verified external API behavior (docs/wikimedia-api.md)
 tests/            Vitest unit tests (deterministic, no network)
+tests/integration live tests against the real Wikimedia API (opt-in)
 examples/         example requests and outputs
 evaluation/       cheap-model (Haiku 4.5) evaluation materials
 ```
@@ -75,5 +78,6 @@ Every command prints one JSON object to stdout:
 | ------------------- | ----------------------------------- |
 | `npm run build`     | Compile `src/` to `dist/`           |
 | `npm run typecheck` | Type-check `src/` and `tests/`      |
-| `npm test`          | Run the Vitest suite once           |
-| `npm run test:watch`| Run Vitest in watch mode            |
+| `npm test`          | Run the unit tests once (no network) |
+| `npm run test:watch`| Run the unit tests in watch mode     |
+| `npm run test:integration` | Run live tests against the real Wikimedia API (needs internet; set `WIKI_SKILL_CONTACT`) |
