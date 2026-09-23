@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+
+# Local pageview/resolver cache
+.cache/
+
+# Generated charts and reports
+output/
+
+.env
+*.log
+.DS_Store
+Thumbs.db

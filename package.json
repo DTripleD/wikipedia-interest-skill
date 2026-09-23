@@ -1,0 +1,26 @@
+{
+  "name": "wikipedia-interest-skill",
+  "version": "0.1.0",
+  "description": "Agent Skill: deterministic analysis of Wikipedia pageviews across languages and topics.",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "bin": {
+    "wiki-interest": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cli": "node dist/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}
