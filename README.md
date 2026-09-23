@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–4 (project setup, Pageviews API client, article resolver, data model and caching) are complete. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–5 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine) are complete. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Architecture (summary)
@@ -34,7 +34,8 @@ src/
                   Pageviews API client (api.ts), topic → article resolver (resolver.ts)
   data/           daily series model and monthly aggregation (series.ts),
                   file cache (cache.ts), cached incremental fetching (pageviews.ts)
-  analysis/       trends, outliers, confidence                  (Stage 5–6)
+  analysis/       statistics, trends (Theil–Sen, Mann–Kendall), outliers (Hampel),
+                  per-series analysis, cross-language comparison; confidence (Stage 6)
   charts/         Vega-Lite → SVG                               (Stage 7)
   reports/        one-page PDF via PDFKit                       (Stage 8)
 docs/             verified external API behavior (docs/wikimedia-api.md)

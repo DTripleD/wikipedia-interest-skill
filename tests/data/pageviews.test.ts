@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { getDailySeries, RECENT_TTL_MS, type SeriesOptions, type SeriesRequest } from '../../src/data/pageviews.js';
+import { getDailySeries, getEditionDailySeries, RECENT_TTL_MS, type SeriesOptions, type SeriesRequest } from '../../src/data/pageviews.js';
 import { WikimediaApiError } from '../../src/wikipedia/http.js';
 import { MemoryCache } from '../helpers/memory-cache.js';
 
@@ -232,5 +232,21 @@ describe('getDailySeries: incremental cache', () => {
     const failing = vi.fn(async () => new Response('boom', { status: 500 }));
     await expect(getDailySeries(REQ, options(failing, cache))).rejects.toMatchObject({ code: 'SERVER_ERROR' });
     expect(cache.entries.size).toBe(0);
+  });
+});
+
+describe('getEditionDailySeries', () => {
+  it('fetches edition totals from the aggregate endpoint and caches them separately', async () => {
+    const api = fakeApi(() => 1_000_000);
+    const cache = new MemoryCache();
+    const req = { language: 'cs', start: '2026-08-01', end: '2026-08-31' };
+    const { series, apiRequests } = await getEditionDailySeries(req, options(api.fetchMock, cache));
+    expect(apiRequests).toBe(1);
+    expect(String(api.fetchMock.mock.calls[0]![0])).toContain('/pageviews/aggregate/cs.wikipedia/all-access/user/daily/20260801/20260831');
+    expect(series).toMatchObject({ project: 'cs.wikipedia', article: null, start: '2026-08-01', end: '2026-08-31' });
+    expect(series.coverage.reportedDays).toBe(31);
+    expect((await getEditionDailySeries(req, options(api.fetchMock, cache))).apiRequests).toBe(0);
+    // An article series for the same project does not reuse the edition entry.
+    expect((await getDailySeries({ ...req, article: 'X' }, options(api.fetchMock, cache))).apiRequests).toBe(1);
   });
 });

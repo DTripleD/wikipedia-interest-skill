@@ -26,8 +26,8 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 2  | Wikimedia Pageviews API client          | ✅ done     |
 | 3  | Wikipedia article resolver              | ✅ done     |
 | 4  | Data model, normalization, caching      | ✅ done     |
-| 5  | Analytics engine                        | ⏭ next      |
-| 6  | Confidence / evidence model             | pending     |
+| 5  | Analytics engine                        | ✅ done     |
+| 6  | Confidence / evidence model             | ⏭ next      |
 | 7  | Charts                                  | pending     |
 | 8  | Report generation (one-page PDF)        | pending     |
 | 9  | CLI / tool interface                    | pending     |
@@ -37,7 +37,7 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 13 | Edge cases and robustness               | pending     |
 | 14 | Final cleanup                           | pending     |
 
-**Current stage:** Stage 4 is complete and awaiting review/commit. Stage 5 comes next.
+**Current stage:** Stage 5 is complete and awaiting review/commit. Stage 6 comes next.
 
 ## Decisions made (with the user)
 
@@ -132,11 +132,45 @@ Decisions (agreed with the user): impute missing days as 0 with a flag and count
   - Trailing unreported days after `finalThrough` are **trimmed** (with a warning), not imputed. If nothing remains, the result is `INVALID_INPUT`. A series with no reported days gets a warning; a 404 counts as "no reported days".
 - **Resolver cache:** `ResolverOptions.cache`. Successful Action API bodies are cached by URL for `RESOLVER_CACHE_TTL_MS` (7 days) inside `callApi`. MediaWiki errors are never cached.
 - **Library functions do not cache by default** (`cache` omitted means no cache), so they stay pure and testable. The CLI (Stage 9) must pass `openCache()`.
+- **Edition totals (added in Stage 5):** `getEditionDailySeries({language, start, end})` uses the same caching and trimming, but a separate cache namespace (`edition-pageviews`). It returns a `PageviewSeries` with `article: null`.
+- **Helpers added in Stage 5:** `sliceSeries(series, start, end)` recomputes coverage; `aggregateWeekly(series)` groups by ISO week (Monday start) and flags `complete`.
+
+### Analytics engine (Stage 5) — `src/analysis/`
+
+Decisions (agreed with the user): Theil–Sen + Mann–Kendall for the trend; Hampel (rolling median + MAD) for outliers; normalization by edition-wide pageviews; 90-day recent-vs-previous and 365-day YoY windows.
+
+- **`stats.ts`:** `sum`, `mean`, `median`, `sampleStdDev`, `coefficientOfVariation`, `medianAbsoluteDeviation`, `meanAbsoluteDeviation`, `normalCdf` (Abramowitz–Stegun erf, error < 1.5e-7).
+- **`trends.ts`:**
+  - `theilSen(ys)` and `mannKendall(ys)` (tie correction, continuity correction, two-sided p; p = 1 exactly when z = 0).
+  - `analyzeTrend(series)` runs on the **average daily views of complete months**. It falls back to complete ISO weeks, and needs at least `MIN_TREND_PERIODS` = 8 periods; otherwise it returns `{available: false, reason}`. Daily data are never used, because weekday seasonality and autocorrelation would inflate significance.
+  - `direction` is `increasing`/`decreasing` only if p < 0.05; otherwise `no_significant_trend`.
+  - `slopePerPeriod`, `fittedStart` and `fittedEnd` come from the linear Theil–Sen fit (for chart lines).
+  - `relativeChangePerYear` = `expm1(slope_of_ln(values) × periods per year)`, i.e. a compound rate that is always > −100 %. It is null if any period has 0 views. The linear-slope/median alternative was rejected because it gave −186 %/year on the real uk data after a level drop.
+  - `comparePeriods(series, windowDays)`: the last N days vs the N days before, by **daily mean**. `relativeChange` is null if the previous mean is 0. It returns `{available: false, reason}` when the series has fewer than 2N days.
+  - `movingAverage(points, window)` is trailing and null until the window is full.
+- **`outliers.ts`:** `detectOutliers(series)` = Hampel filter with a ±14-day centred window (truncated at the edges) and robust z = 0.6745·(x − median)/MAD, flagged if |z| > 3.5. If MAD = 0, it falls back to z = (x − median)/(1.253314·meanAD). It returns spikes and dips, `share`, and `excessViewsShare` (views above the baseline on spike days / total views). Imputed zeros are treated as data.
+- **`analyze.ts`:** `analyzeSeries(series, {editionSeries?, recentDays=90, yoyDays=365})` → `SeriesAnalysis` with:
+  - `period`, `coverage`, `summary` (total, daily mean and median, peak day), `normalization` (`viewsPerMillion` of edition views, or null);
+  - `monthly` rows (views, days, complete, `dailyAverage`, `viewsPerMillion`), `movingAverages` {7, 28};
+  - `recentVsPrevious`, `yearOverYear`, `trend`, `volatility` (`dailyCv`; `monthlyCv` of complete-month daily averages, which needs at least 3 months), `outliers`, `warnings`.
+  - The edition series must match project/access/agent (otherwise RangeError). If it does not cover the period, normalization is null with a warning; gaps in it also produce a warning.
+- **`compare.ts`:** `compareLanguages([{series, editionSeries?}], options)` cuts all series to their **common period** (with a warning for each one that was cut), runs `analyzeSeries` on each, and ranks `byTotalViews` and `byViewsPerMillion`. The latter is null unless every input has edition data. Each row has `relativeToLeader`. It works for different articles in the same language too.
+- Results keep full-precision numbers and full arrays (moving averages, outlier lists). The CLI (Stage 9) must round and trim them for the agent.
+
+**Live check (2026-09-24), intermittent fasting, 2024-09-23..2026-09-22:**
+- cs `Přerušovaný půst`: 6 716 views, 4.41 per million, YoY −54 %, decreasing (p < 0.001), 20 outliers carrying 18 % of views. The biggest outlier is 2025-04-14 (508 views vs a baseline of 14).
+- uk `Інтервальне голодування`: 10 522 views, 6.72 per million, YoY −75 %, decreasing.
+- uk shows a **level drop** in April 2025 (≈ 28 → 6 views/day). Stage 6 should treat step changes as a reason for caution when interpreting a trend.
 
 ## Planned design (not yet implemented; revisit in each stage)
 
-- **Confidence (Stage 6):** a high/medium/low level from explicit rules (coverage, sample size, CV volatility, outlier share, trend fit), each with human-readable reasons. No fabricated percentages. The resolver's `confidence` and notes (e.g. section redirects) must feed into it.
-- **CLI (Stage 9):** warn when `WIKI_SKILL_CONTACT` is not set. Wire `openCache()` into resolve/fetch, add `--no-cache`, and report `apiRequests` in the output.
+- **Confidence (Stage 6):** a high/medium/low level from explicit rules, each with human-readable reasons. No fabricated percentages. Inputs available from Stage 5:
+  - `coverage.imputedShare` and `firstReportedDate`; period length;
+  - `trend.available`, `direction` and `mannKendall.pValue`; `volatility.dailyCv` / `monthlyCv`;
+  - `outliers.share` and `excessViewsShare`; whether YoY/recent comparisons are available; the absolute level (a low daily mean makes the data noisy);
+  - the resolver's `confidence` and notes (e.g. section redirects).
+  - Consider detecting level shifts (see the uk finding above) and seasonality.
+- **CLI (Stage 9):** warn when `WIKI_SKILL_CONTACT` is not set. Wire `openCache()` into resolve/fetch, add `--no-cache`, and report `apiRequests` in the output. Fetch edition totals for normalization (1 extra request per language, cached). Round numbers and drop large arrays from the JSON.
 - Generated artifacts go to `output/` (gitignored).
 
 ## Current layout
@@ -147,17 +181,24 @@ src/dates.ts                   UTC ISO-date helpers
 src/cli.ts                     CLI entry; exported run(argv) is pure and testable; only `version` exists
 src/wikipedia/http.ts          shared HTTP layer (retry, timeout, errors)
 src/wikipedia/languages.ts     edition codes / aliases, URL helpers
-src/wikipedia/api.ts           Pageviews API client
+src/wikipedia/api.ts           Pageviews API client (per-article + aggregate/edition totals)
 src/wikipedia/resolver.ts      topic → article resolver (MediaWiki Action API), optional response cache
-src/data/series.ts             PageviewSeries model, normalization (gap filling), monthly aggregation
+src/data/series.ts             PageviewSeries model, normalization (gap filling), slicing, monthly/weekly aggregation
 src/data/cache.ts              JsonCache interface, FileCache (JSON files), openCache
-src/data/pageviews.ts          getDailySeries: cached incremental daily fetching
-src/{analysis,charts,reports}/ empty (.gitkeep) — filled in later stages
+src/data/pageviews.ts          getDailySeries / getEditionDailySeries: cached incremental daily fetching
+src/analysis/stats.ts          descriptive statistics, normal CDF
+src/analysis/trends.ts         Theil–Sen, Mann–Kendall, trend, period comparison, moving average
+src/analysis/outliers.ts       Hampel outlier detection
+src/analysis/analyze.ts        analyzeSeries: full per-series analysis (+ edition normalization)
+src/analysis/compare.ts        compareLanguages: common period, rankings
+src/{charts,reports}/          empty (.gitkeep) — filled in later stages
 docs/wikimedia-api.md          verified Wikimedia API behavior + sources
 tests/*.test.ts                config, CLI, date helper tests
 tests/wikipedia/*.test.ts      http, languages, api, resolver unit tests (scripted fetch, no network)
 tests/data/*.test.ts           series, cache, getDailySeries unit tests (fake API, MemoryCache)
 tests/helpers/memory-cache.ts  in-memory JsonCache for tests
+tests/helpers/series.ts        makeSeries / seriesOf fixtures
+tests/analysis/*.test.ts       stats, trends, outliers, analyze/compare (reference values from Python)
 tests/integration/*.live.test.ts  live API tests (npm run test:integration)
 tests/integration/setup.ts     loads .env for live tests
 .env.example                   template for .env (WIKI_SKILL_CONTACT)
@@ -171,7 +212,12 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 ## Known limitations
 
 - The CLI has only `version`. The client and resolver are not yet exposed through the CLI (Stage 9).
-- The cache is not yet used by any command, because the CLI (Stage 9) does not exist yet.
+- The cache and the analytics are not yet used by any command, because the CLI (Stage 9) does not exist yet.
+- The Mann–Kendall test assumes independent observations. Monthly averages are still autocorrelated, so p-values are somewhat optimistic. Weekly-basis trends (short periods) are the most affected.
+- The trend is monotonic/linear only. Level shifts, seasonality and structural breaks are not modelled (Stage 6 should flag them).
+- YoY compares the last 365 days with the 365 before. Leap days shift the alignment by one day.
+- In outlier detection, a sustained level shift produces a few flagged days until the rolling window catches up. Low-traffic series (a few views/day) can produce outliers from noise alone.
+- Normalization by edition totals controls for edition size, but not for audience composition or for how well the topic is covered in each edition.
 - Days older than 3 days are assumed never to change (unverified). If Wikimedia backfills data, the cache keeps the old values until `.cache/` is deleted.
 - Trailing unreported days in the last 3 days are trimmed, so a low-traffic article with real zero views at the end of the range gets a slightly shorter series.
 - There is no cache eviction or size limit. The files are small (about 25 bytes per reported day).
@@ -187,4 +233,4 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 
 ## Remaining work
 
-Stages 5–14 (see the table above).
+Stages 6–14 (see the table above).

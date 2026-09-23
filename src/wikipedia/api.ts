@@ -79,6 +79,7 @@ export interface PageviewsResult {
 }
 
 export interface PageviewsClientOptions extends HttpOptions {
+  /** Overrides the per-article endpoint base only (not the aggregate endpoint). */
   baseUrl?: string;
 }
 
@@ -111,35 +112,68 @@ export async function fetchPageviews(
   options: PageviewsClientOptions = {},
 ): Promise<PageviewsResult> {
   const now = options.now ?? (() => new Date());
+  const { resolved: common, warnings } = validateQuery(query, todayUtc(now()));
+  const article = normalizeArticleTitle(query.article);
+  if (article.length === 0) throw new WikimediaApiError('INVALID_INPUT', 'Article title must not be empty.');
+  const resolved = { ...common, article };
+
+  const result = await fetchItems(buildPageviewsUrl(resolved, options.baseUrl), common, options);
+  return { ...result, article, warnings };
+}
+
+/** Edition-wide totals: the aggregate endpoint (all articles of a project). */
+export type ProjectPageviewsQuery = Omit<PageviewsQuery, 'article'>;
+export type ProjectPageviewsResult = Omit<PageviewsResult, 'article'>;
+
+export const PAGEVIEWS_AGGREGATE_BASE = 'https://wikimedia.org/api/rest_v1/metrics/pageviews/aggregate';
+
+export function buildProjectPageviewsUrl(
+  query: Required<ProjectPageviewsQuery>,
+  baseUrl: string = PAGEVIEWS_AGGREGATE_BASE,
+): string {
+  const parts = [query.project, query.access, query.agent, query.granularity, toApiDate(query.start), toApiDate(query.end)];
+  return `${baseUrl}/${parts.join('/')}`;
+}
+
+/**
+ * Total pageviews of a whole edition, e.g. all of pl.wikipedia. Same response format,
+ * validation and 404 semantics as the per-article endpoint (verified 2026-09-24).
+ */
+export async function fetchProjectPageviews(
+  query: ProjectPageviewsQuery,
+  options: PageviewsClientOptions = {},
+): Promise<ProjectPageviewsResult> {
+  const now = options.now ?? (() => new Date());
   const { resolved, warnings } = validateQuery(query, todayUtc(now()));
-  const url = buildPageviewsUrl(resolved, options.baseUrl);
+  const result = await fetchItems(buildProjectPageviewsUrl(resolved), resolved, options);
+  return { ...result, warnings };
+}
 
+async function fetchItems(
+  url: string,
+  resolved: Required<ProjectPageviewsQuery>,
+  options: PageviewsClientOptions,
+): Promise<Omit<ProjectPageviewsResult, 'warnings'>> {
   const response = await requestWithRetry(url, options, { service: SERVICE, passStatuses: [404] });
-
   const base = {
     project: resolved.project,
-    article: normalizeArticleTitle(resolved.article),
     granularity: resolved.granularity,
     access: resolved.access,
     agent: resolved.agent,
     start: resolved.start,
     end: resolved.end,
-    warnings,
   };
-
-  if (response.status === 404) {
-    return { ...base, points: [], noData: true };
-  }
+  if (response.status === 404) return { ...base, points: [], noData: true };
 
   const body = await readJson(response, options, SERVICE);
-  const points = parseItems(body, resolved.granularity);
-  return { ...base, points, noData: false };
+  return { ...base, points: parseItems(body, resolved.granularity), noData: false };
 }
 
+/** Validates everything except the article title. */
 function validateQuery(
-  query: PageviewsQuery,
+  query: ProjectPageviewsQuery,
   today: string,
-): { resolved: Required<PageviewsQuery>; warnings: string[] } {
+): { resolved: Required<ProjectPageviewsQuery>; warnings: string[] } {
   const warnings: string[] = [];
   const invalid = (msg: string) => new WikimediaApiError('INVALID_INPUT', msg);
 
@@ -147,9 +181,6 @@ function validateQuery(
   if (!PROJECT.test(project)) {
     throw invalid(`Invalid project "${query.project}". Expected "<language>.wikipedia", e.g. "pl.wikipedia".`);
   }
-
-  const article = normalizeArticleTitle(query.article);
-  if (article.length === 0) throw invalid('Article title must not be empty.');
 
   const granularity = query.granularity ?? 'daily';
   const access = query.access ?? 'all-access';
@@ -190,7 +221,7 @@ function validateQuery(
     warnings.push('Monthly granularity with a range that does not cover whole months: the first/last month totals are partial.');
   }
 
-  return { resolved: { project, article, start, end: query.end, granularity, access, agent }, warnings };
+  return { resolved: { project, start, end: query.end, granularity, access, agent }, warnings };
 }
 
 function isLastDayOfMonth(isoDate: string): boolean {

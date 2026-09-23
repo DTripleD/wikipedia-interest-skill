@@ -30,6 +30,21 @@ The client always sends `{lang}.wikipedia` and defaults to `all-access` / `user`
 `agent=user` leaves out self-identified spiders and heuristically detected automated
 traffic [docs].
 
+### Aggregate endpoint (edition totals)
+
+```
+GET https://wikimedia.org/api/rest_v1/metrics/pageviews/aggregate/
+    {project}/{access}/{agent}/{granularity}/{start}/{end}
+```
+
+- Same segment values and date formats as per-article. `daily` works. [verified 2026-09-24]
+- Items have the same shape without `article`: `{project, access, agent, granularity, timestamp, views}`. [verified]
+- An unknown project (`xx.wikipedia`) → the same 404 problem body as per-article. [verified]
+- An early start date is truncated to 2015-07-01, as for per-article. [verified]
+- Example: in January 2024, pl.wikipedia had 258 404 661 `user` views and cs.wikipedia had
+  85 518 969. Raw article views therefore mostly reflect edition size, and the analysis also
+  reports views per million edition views. [verified]
+
 ## Responses
 
 - **200:** `{"items":[{project, article, granularity, timestamp:"YYYYMMDD00", access, agent, views}]}`,

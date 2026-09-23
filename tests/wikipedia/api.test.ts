@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   PageviewsApiError,
   buildPageviewsUrl,
+  buildProjectPageviewsUrl,
   fetchPageviews,
+  fetchProjectPageviews,
   normalizeArticleTitle,
   parseRetryAfter,
   wikipediaProject,
@@ -309,5 +311,48 @@ describe('fetchPageviews: response validation', () => {
   it.each(bad)('%s → INVALID_RESPONSE', async (_name, response) => {
     const { options } = setup(response);
     await expectError(fetchPageviews(QUERY, options), 'INVALID_RESPONSE');
+  });
+});
+
+describe('fetchProjectPageviews (edition totals)', () => {
+  it('calls the aggregate endpoint and parses items without an article', async () => {
+    const edition = (timestamp: string, views: number) => {
+      const { article: _article, ...rest } = item(timestamp, views, { project: 'cs.wikipedia' });
+      return rest;
+    };
+    const { fetchMock, options } = setup(json({ items: [edition('2024010200', 2810429), edition('2024010100', 2660435)] }));
+    const result = await fetchProjectPageviews({ project: 'cs.wikipedia', start: '2024-01-01', end: '2024-01-02' }, options);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      'https://wikimedia.org/api/rest_v1/metrics/pageviews/aggregate/cs.wikipedia/all-access/user/daily/20240101/20240102',
+    );
+    expect(result).toEqual({
+      project: 'cs.wikipedia',
+      granularity: 'daily',
+      access: 'all-access',
+      agent: 'user',
+      start: '2024-01-01',
+      end: '2024-01-02',
+      points: [
+        { date: '2024-01-01', views: 2660435 },
+        { date: '2024-01-02', views: 2810429 },
+      ],
+      noData: false,
+      warnings: [],
+    });
+  });
+
+  it('returns noData on 404 and validates input', async () => {
+    const { options } = setup(json(NOT_FOUND_BODY, 404));
+    const result = await fetchProjectPageviews({ project: 'xx.wikipedia', start: '2024-01-01', end: '2024-01-02' }, options);
+    expect(result).toMatchObject({ noData: true, points: [] });
+    await expect(fetchProjectPageviews({ project: 'cswiki', start: '2024-01-01', end: '2024-01-02' }, options)).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    });
+  });
+
+  it('builds the aggregate URL', () => {
+    expect(
+      buildProjectPageviewsUrl({ project: 'pl.wikipedia', access: 'desktop', agent: 'all-agents', granularity: 'monthly', start: '2024-01-01', end: '2024-03-31' }),
+    ).toBe('https://wikimedia.org/api/rest_v1/metrics/pageviews/aggregate/pl.wikipedia/desktop/all-agents/monthly/20240101/20240331');
   });
 });

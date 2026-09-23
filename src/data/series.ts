@@ -10,7 +10,7 @@
  * - Recent days that are not published yet are NOT imputed: the fetch layer trims them
  *   off the end of the range before building the series (see pageviews.ts).
  */
-import { daysInMonth, daysInclusive, eachDay, isIsoDate } from '../dates.js';
+import { addDays, daysInMonth, daysInclusive, eachDay, isIsoDate } from '../dates.js';
 import type { Access, Agent, PageviewPoint } from '../wikipedia/api.js';
 
 export interface DailyPoint {
@@ -38,8 +38,8 @@ export interface SeriesMeta {
   language: string;
   /** Pageviews project, e.g. "pl.wikipedia". */
   project: string;
-  /** Article title in API form (underscores). */
-  article: string;
+  /** Article title in API form (underscores); null for edition-wide totals. */
+  article: string | null;
   access: Access;
   agent: Agent;
 }
@@ -129,6 +129,16 @@ export function validateSeries(series: PageviewSeries): void {
   });
 }
 
+/** The part of a series within [start, end] (must lie inside it), with coverage recomputed. */
+export function sliceSeries(series: PageviewSeries, start: string, end: string): PageviewSeries {
+  if (start < series.start || end > series.end) {
+    throw new RangeError(`${start}..${end} is not within the series range ${series.start}..${series.end}.`);
+  }
+  const { points, coverage: _coverage, warnings, start: _start, end: _end, ...meta } = series;
+  const reported = points.filter((p) => !p.imputed && p.date >= start && p.date <= end);
+  return buildSeries(meta, start, end, reported, warnings);
+}
+
 export function totalViews(points: readonly DailyPoint[]): number {
   return points.reduce((sum, p) => sum + p.views, 0);
 }
@@ -149,4 +159,33 @@ export function aggregateMonthly(series: PageviewSeries): MonthlyTotal[] {
   }
   for (const total of months.values()) total.complete = total.days === total.calendarDays;
   return [...months.values()];
+}
+
+export interface WeeklyTotal {
+  /** Monday of the ISO week. */
+  weekStart: string;
+  views: number;
+  /** Days of this week inside the series (7 when complete). */
+  days: number;
+  complete: boolean;
+  imputedDays: number;
+}
+
+/** Totals per ISO week (Monday–Sunday). First/last weeks may be partial; check `complete`. */
+export function aggregateWeekly(series: PageviewSeries): WeeklyTotal[] {
+  const weeks = new Map<string, WeeklyTotal>();
+  for (const p of series.points) {
+    const weekday = (new Date(`${p.date}T00:00:00Z`).getUTCDay() + 6) % 7; // Monday = 0
+    const weekStart = addDays(p.date, -weekday);
+    let total = weeks.get(weekStart);
+    if (!total) {
+      total = { weekStart, views: 0, days: 0, complete: false, imputedDays: 0 };
+      weeks.set(weekStart, total);
+    }
+    total.views += p.views;
+    total.days += 1;
+    if (p.imputed) total.imputedDays += 1;
+  }
+  for (const total of weeks.values()) total.complete = total.days === 7;
+  return [...weeks.values()];
 }

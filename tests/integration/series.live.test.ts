@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { FileCache } from '../../src/data/cache.js';
-import { getDailySeries } from '../../src/data/pageviews.js';
+import { getDailySeries, getEditionDailySeries } from '../../src/data/pageviews.js';
 import { resolveTopic } from '../../src/wikipedia/resolver.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'wiki-skill-live-'));
@@ -37,6 +37,15 @@ describe('getDailySeries (live)', () => {
       options,
     );
     expect(series.coverage).toMatchObject({ expectedDays: 31, reportedDays: 13, imputedDays: 18 });
+  });
+});
+
+describe('getEditionDailySeries (live)', () => {
+  it('returns edition-wide totals from the aggregate endpoint', async () => {
+    const { series } = await getEditionDailySeries({ language: 'cs', start: '2024-01-01', end: '2024-01-03' }, options);
+    expect(series.article).toBeNull();
+    // Historical values observed on 2026-09-24.
+    expect(series.points.map((p) => p.views)).toEqual([2660435, 2810429, 2677346]);
   });
 });
 

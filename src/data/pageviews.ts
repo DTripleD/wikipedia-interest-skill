@@ -19,6 +19,7 @@ import {
   AGENT_TYPES,
   DATA_START_DATE,
   fetchPageviews,
+  fetchProjectPageviews,
   normalizeArticleTitle,
   type Access,
   type Agent,
@@ -36,6 +37,7 @@ export const RECENT_DAYS = 3;
 export const RECENT_TTL_MS = 4 * 60 * 60 * 1000;
 
 const NAMESPACE = 'pageviews';
+const EDITION_NAMESPACE = 'edition-pageviews';
 
 export interface SeriesRequest {
   /** Language code or edition, e.g. "pl" (aliases like "nb" are normalized). */
@@ -73,24 +75,48 @@ interface StoredSeries {
   points: PageviewPoint[];
 }
 
+/** Edition-wide totals request (all articles of `language`.wikipedia). */
+export type EditionSeriesRequest = Omit<SeriesRequest, 'article'>;
+
 export async function getDailySeries(request: SeriesRequest, options: SeriesOptions = {}): Promise<SeriesFetchResult> {
+  const article = normalizeArticleTitle(request.article);
+  if (article.length === 0) throw new WikimediaApiError('INVALID_INPUT', 'Article title must not be empty.');
+  return loadSeries(request, article, options);
+}
+
+/**
+ * Daily total pageviews of a whole edition, used to normalize article views by edition
+ * size. Same caching and trimming rules as getDailySeries; `series.article` is null.
+ */
+export async function getEditionDailySeries(
+  request: EditionSeriesRequest,
+  options: SeriesOptions = {},
+): Promise<SeriesFetchResult> {
+  return loadSeries(request, null, options);
+}
+
+async function loadSeries(
+  request: EditionSeriesRequest,
+  article: string | null,
+  options: SeriesOptions,
+): Promise<SeriesFetchResult> {
   const now = options.now?.() ?? new Date();
   const today = todayUtc(now);
-  const { meta, start, end, warnings } = validateRequest(request, today);
+  const { meta, start, end, warnings } = validateRequest(request, article, today);
   const cache = options.cache ?? null;
-  const key = [meta.project, meta.access, meta.agent, meta.article].join('|');
+  const namespace = article === null ? EDITION_NAMESPACE : NAMESPACE;
+  const key = [meta.project, meta.access, meta.agent, ...(article === null ? [] : [article])].join('|');
   const cutoff = addDays(today, -RECENT_DAYS);
 
-  const cached = cache?.get(NAMESPACE, key);
+  const cached = cache?.get(namespace, key);
   let stored = cached ? parseStored(cached.value) : null;
   let apiRequests = 0;
 
   const fetchRange = async (from: string, to: string): Promise<PageviewPoint[]> => {
     apiRequests++;
-    const result = await fetchPageviews(
-      { project: meta.project, article: meta.article, start: from, end: to, access: meta.access, agent: meta.agent },
-      options,
-    );
+    const query = { project: meta.project, start: from, end: to, access: meta.access, agent: meta.agent };
+    const result =
+      article === null ? await fetchProjectPageviews(query, options) : await fetchPageviews({ ...query, article }, options);
     return result.points; // a 404 (noData) yields [] — no reported days in the range
   };
 
@@ -121,7 +147,7 @@ export async function getDailySeries(request: SeriesRequest, options: SeriesOpti
     }
     stored = { from, to, finalThrough, tailFetchedAt, points };
   }
-  if (cache && apiRequests > 0) cache.set(NAMESPACE, key, stored, now);
+  if (cache && apiRequests > 0) cache.set(namespace, key, stored, now);
 
   // Trim trailing recent days the API has not reported: they are most likely not
   // published yet, so counting them as zero would fake a drop at the end of the series.
@@ -145,17 +171,17 @@ export async function getDailySeries(request: SeriesRequest, options: SeriesOpti
   const points = stored.points.filter((p) => p.date >= start && p.date <= effectiveEnd);
   if (points.length === 0) {
     warnings.push(
-      `The Pageviews API reported no views of "${meta.article}" on ${meta.project} in this period: the article may not have existed under this title, or had no views.`,
+      article === null
+        ? `The Pageviews API reported no views for the whole ${meta.project} edition in this period.`
+        : `The Pageviews API reported no views of "${article}" on ${meta.project} in this period: the article may not have existed under this title, or had no views.`,
     );
   }
   return { series: buildSeries(meta, start, effectiveEnd, points, warnings), apiRequests };
 }
 
-function validateRequest(request: SeriesRequest, today: string) {
+function validateRequest(request: EditionSeriesRequest, article: string | null, today: string) {
   const invalid = (msg: string) => new WikimediaApiError('INVALID_INPUT', msg);
   const language = toEdition(request.language);
-  const article = normalizeArticleTitle(request.article);
-  if (article.length === 0) throw invalid('Article title must not be empty.');
   const access = request.access ?? 'all-access';
   const agent = request.agent ?? 'user';
   if (!ACCESS_TYPES.includes(access)) throw invalid(`Invalid access "${access}". Allowed: ${ACCESS_TYPES.join(', ')}.`);
