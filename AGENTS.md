@@ -25,8 +25,8 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 1  | Project setup                           | ✅ done     |
 | 2  | Wikimedia Pageviews API client          | ✅ done     |
 | 3  | Wikipedia article resolver              | ✅ done     |
-| 4  | Data model, normalization, caching      | ⏭ next      |
-| 5  | Analytics engine                        | pending     |
+| 4  | Data model, normalization, caching      | ✅ done     |
+| 5  | Analytics engine                        | ⏭ next      |
 | 6  | Confidence / evidence model             | pending     |
 | 7  | Charts                                  | pending     |
 | 8  | Report generation (one-page PDF)        | pending     |
@@ -37,7 +37,7 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 13 | Edge cases and robustness               | pending     |
 | 14 | Final cleanup                           | pending     |
 
-**Current stage:** Stage 3 is complete and awaiting review/commit. Stage 4 comes next.
+**Current stage:** Stage 4 is complete and awaiting review/commit. Stage 5 comes next.
 
 ## Decisions made (with the user)
 
@@ -48,6 +48,7 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 - **PDF:** PDFKit + svg-to-pdfkit to embed vector charts. Installed in Stage 8.
   - Native deps such as `canvas` are avoided on purpose: the repo lives under a OneDrive path with Cyrillic characters, where native builds on Windows are fragile.
 - **User-Agent:** `wikipedia-interest-skill/<version> (<contact>)`. The contact comes from `WIKI_SKILL_CONTACT`; the fallback is a neutral placeholder (see `src/config.ts`).
+- **`.env` support (added before Stage 4):** `loadDotEnv()` in `src/config.ts` wraps Node's native `process.loadEnvFile` (no dotenv). It always reads the project-root `.env` (resolved from `import.meta.url`, independent of cwd). Shell variables win over the file, and a missing file is ignored. It is called only in the CLI `main()` (so `run()` stays pure) and in `tests/integration/setup.ts`. Unit tests never load it. `.env.example` is committed; `.env` is gitignored.
 - **CLI contract:** every command prints exactly one JSON envelope to stdout. On success: `{ok:true, command, data}`. On failure: `{ok:false, command, error:{code, message}}`. Exit code is 0 or 1. Outputs stay compact (metrics and file paths, never raw series) so a cheap model can use them.
 - **Stage 12 evaluation** will be run **manually by the user in Claude Code with Haiku 4.5**. The project supplies scenarios, a checklist and a results template.
 - **Documentation language:** English.
@@ -115,28 +116,51 @@ All Wikimedia API assumptions are recorded, with their sources, in
 - `learning English` is a disambiguation page on en.wikipedia; `English as a second or foreign language` (Q130192) has no pl, uk or no article.
 - The agent has to handle this in SKILL.md: report the missing editions, or ask the user and pass `titles`.
 
+### Data model, normalization, caching (Stage 4) — `src/data/`
+
+Decisions (agreed with the user): impute missing days as 0 with a flag and count them; incremental pageview cache; resolver cache TTL of 7 days; `.cache/` by default, configurable via `WIKI_SKILL_CACHE_DIR`.
+
+- **`series.ts` (model):** `PageviewSeries` = `SeriesMeta` (`language` edition, `project`, `article` in API form with underscores, `access`, `agent`) + `start`/`end` + dense `points: {date, views, imputed}[]` (one per day, sorted) + `coverage` + `warnings[]`.
+  - `coverage` = `{expectedDays, reportedDays, imputedDays, imputedShare, firstReportedDate, lastReportedDate}`. This is a data-quality input for Stage 6: a late `firstReportedDate` suggests the article was created later.
+  - `buildSeries(meta, start, end, reported, warnings)` validates the points (in range, unique, non-negative integers) and fills gaps. `validateSeries` checks the invariants of an existing series.
+  - `totalViews(points)` and `aggregateMonthly(series)` → `{month, views, days, calendarDays, complete, imputedDays}`. Partial first/last months are flagged, never scaled. Stage 5 should build on these rather than duplicate them.
+- **`cache.ts`:** `JsonCache` interface (`get(ns, key)` → `{storedAt, value}` | null, `set(ns, key, value, now)`). `FileCache` stores `<dir>/<ns>/<sha256(key)>.json` with `{version, key, storedAt, value}` and writes atomically (temp file + rename). Corrupt or foreign-version files count as misses; write errors are ignored. `openCache(env)` honours `WIKI_SKILL_CACHE_DIR` (`getCacheDir` in `config.ts`). `CACHE_VERSION` must be bumped when a cached shape changes.
+- **`pageviews.ts`:** `getDailySeries({language, article, start, end, access?, agent?}, {cache, ...http})` → `{series, apiRequests}`.
+  - It always fetches **daily** data. `end` is clamped to yesterday (UTC) and `start` to 2015-07-01, with warnings. A start of today or later is `INVALID_INPUT`.
+  - The cache holds one entry per `project|access|agent|article`: a single contiguous `[from, to]` of the reported points, plus `finalThrough` (today − 3 days at fetch time) and `tailFetchedAt`.
+  - A request fetches at most 2 ranges: `[start, from−1]`, and `[finalThrough+1, max(end, to)]`. The second runs only when `end > to`, or when the non-final tail is older than 4 h (`RECENT_TTL_MS`). A range that does not overlap the cache is joined by fetching the gap, which keeps the cached range contiguous.
+  - Trailing unreported days after `finalThrough` are **trimmed** (with a warning), not imputed. If nothing remains, the result is `INVALID_INPUT`. A series with no reported days gets a warning; a 404 counts as "no reported days".
+- **Resolver cache:** `ResolverOptions.cache`. Successful Action API bodies are cached by URL for `RESOLVER_CACHE_TTL_MS` (7 days) inside `callApi`. MediaWiki errors are never cached.
+- **Library functions do not cache by default** (`cache` omitted means no cache), so they stay pure and testable. The CLI (Stage 9) must pass `openCache()`.
+
 ## Planned design (not yet implemented; revisit in each stage)
 
-- **Data model and cache (Stage 4):** JSON files under `.cache/` (gitignored). Past days are immutable, so only recent days get re-fetched. The cache must also cover resolver lookups: the Action API rate limit is the tightest constraint. Stage 4 also decides how to treat missing days and reports their count.
 - **Confidence (Stage 6):** a high/medium/low level from explicit rules (coverage, sample size, CV volatility, outlier share, trend fit), each with human-readable reasons. No fabricated percentages. The resolver's `confidence` and notes (e.g. section redirects) must feed into it.
-- **CLI (Stage 9):** warn when `WIKI_SKILL_CONTACT` is not set.
+- **CLI (Stage 9):** warn when `WIKI_SKILL_CONTACT` is not set. Wire `openCache()` into resolve/fetch, add `--no-cache`, and report `apiRequests` in the output.
 - Generated artifacts go to `output/` (gitignored).
 
 ## Current layout
 
 ```
-src/config.ts                  User-Agent / contact configuration
+src/config.ts                  User-Agent / contact configuration, .env loading
 src/dates.ts                   UTC ISO-date helpers
 src/cli.ts                     CLI entry; exported run(argv) is pure and testable; only `version` exists
 src/wikipedia/http.ts          shared HTTP layer (retry, timeout, errors)
 src/wikipedia/languages.ts     edition codes / aliases, URL helpers
 src/wikipedia/api.ts           Pageviews API client
-src/wikipedia/resolver.ts      topic → article resolver (MediaWiki Action API)
+src/wikipedia/resolver.ts      topic → article resolver (MediaWiki Action API), optional response cache
+src/data/series.ts             PageviewSeries model, normalization (gap filling), monthly aggregation
+src/data/cache.ts              JsonCache interface, FileCache (JSON files), openCache
+src/data/pageviews.ts          getDailySeries: cached incremental daily fetching
 src/{analysis,charts,reports}/ empty (.gitkeep) — filled in later stages
 docs/wikimedia-api.md          verified Wikimedia API behavior + sources
 tests/*.test.ts                config, CLI, date helper tests
 tests/wikipedia/*.test.ts      http, languages, api, resolver unit tests (scripted fetch, no network)
+tests/data/*.test.ts           series, cache, getDailySeries unit tests (fake API, MemoryCache)
+tests/helpers/memory-cache.ts  in-memory JsonCache for tests
 tests/integration/*.live.test.ts  live API tests (npm run test:integration)
+tests/integration/setup.ts     loads .env for live tests
+.env.example                   template for .env (WIKI_SKILL_CONTACT)
 examples/, evaluation/         empty (.gitkeep)
 tsconfig.json                  strict type-check config (src + tests + configs), noEmit
 tsconfig.build.json            build config (src → dist)
@@ -147,7 +171,11 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 ## Known limitations
 
 - The CLI has only `version`. The client and resolver are not yet exposed through the CLI (Stage 9).
-- There is no caching yet (Stage 4). Every resolve hits the network.
+- The cache is not yet used by any command, because the CLI (Stage 9) does not exist yet.
+- Days older than 3 days are assumed never to change (unverified). If Wikimedia backfills data, the cache keeps the old values until `.cache/` is deleted.
+- Trailing unreported days in the last 3 days are trimmed, so a low-traffic article with real zero views at the end of the range gets a slightly shorter series.
+- There is no cache eviction or size limit. The files are small (about 25 bytes per reported day).
+- Concurrent processes writing the same entry: the last writer wins, and each file stays valid thanks to atomic rename.
 - **Rate limits:** with the default placeholder contact, the Action API is likely to treat the client as "unidentified" (10 req/min; 429 was observed during development). `WIKI_SKILL_CONTACT` should be a real email or URL.
 - A timeout while reading the response body is reported as `TIMEOUT` but is not retried.
 - There is no client-side rate limiter; requests are sequential.
@@ -155,8 +183,8 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 - Search candidates are only as good as MediaWiki full-text search. They are never auto-selected.
 - The resolver only uses the topic's source-language article. Wikis where the concept is covered in a broader article (e.g. pl `Głodówka lecznicza`, a different QID) are not found automatically. The agent can pass them as explicit titles, and they are then marked `medium`.
 - The live tests assert historical values and Wikidata facts observed on 2026-09-23. Update them if Wikimedia data changes.
-- A missing day is assumed to mean "zero views", but this is unverified.
+- A missing day is assumed to mean "zero views", but this is unverified. Such days are imputed as 0, flagged, and counted in `coverage`.
 
 ## Remaining work
 
-Stages 4–14 (see the table above).
+Stages 5–14 (see the table above).

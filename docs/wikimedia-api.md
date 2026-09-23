@@ -68,8 +68,17 @@ same 13 days came back, each with views ≥ 1.
 
 Working hypothesis: a day is omitted when the article had no views from any agent that day,
 so a missing day most likely means 0 views. This is not documented. The client does not
-fill gaps. Stage 4 (normalization) decides how to treat missing dates and must report them
-as a data-quality signal.
+fill gaps.
+
+**How the data layer handles this** ([src/data/](../src/data/)):
+- A missing day is filled with 0 views and flagged `imputed: true`. The number and share of
+  such days are reported in `coverage`.
+- Exception: missing days at the *end* of the range that fall in the last 3 days are cut off
+  rather than imputed. They are most likely not published yet (see the ~1-day lag above).
+  On 2026-09-23 at 21:00 UTC, `en/Astronomy` already had 2026-09-22, while
+  `cs/Hvězdná astronomie` had no rows for 09-17..09-22. Its series therefore ended on
+  09-20 [verified]. A low-traffic article with genuinely zero views on its last days loses
+  those days too; this is a conservative trade-off.
 
 ## Titles
 
@@ -92,6 +101,9 @@ as a data-quality signal.
 - 429 and 503 responses usually include `Retry-After`. Clients must respect it. Without
   it, they should wait at least 5 s or back off exponentially.
 - Successful responses carry `cache-control: s-maxage=14400, max-age=14400` (4 h). [verified]
+  The local cache re-fetches recent (non-final) days after the same 4 h.
+- **Assumption [unverified]:** pageviews for days more than 3 days old no longer change. The
+  incremental cache never re-fetches them. If Wikimedia ever backfills data, clear `.cache/`.
 
 Sources:
 - https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/reference/page-views.html

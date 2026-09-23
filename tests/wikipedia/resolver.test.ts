@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WikimediaApiError } from '../../src/wikipedia/http.js';
-import { parseLookup, parseSearch, resolveTopic, type ResolveRequest } from '../../src/wikipedia/resolver.js';
+import {
+  RESOLVER_CACHE_TTL_MS,
+  parseLookup,
+  parseSearch,
+  resolveTopic,
+  type ResolveRequest,
+} from '../../src/wikipedia/resolver.js';
+import { MemoryCache } from '../helpers/memory-cache.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures shaped like real MediaWiki action=query responses (formatversion=2),
@@ -353,6 +360,41 @@ describe('resolveTopic: validation and errors', () => {
   it('maps a malformed response to INVALID_RESPONSE', async () => {
     const r = router({ 'en|lookup|x': { query: { pages: [] } } }, ['en']);
     await expectError(resolveTopic({ topic: 'x', languages: ['pl'] }, r.options), 'INVALID_RESPONSE');
+  });
+});
+
+describe('resolveTopic: cache', () => {
+  const routes = {
+    'en|lookup|intermittent fasting': IF_EN,
+    'cs|lookup|Přerušovaný půst': page('Přerušovaný půst', { qid: 'Q1666254' }),
+  };
+  const request = { topic: 'intermittent fasting', languages: ['pl', 'cs'] };
+  const at = (iso: string) => () => new Date(iso);
+
+  it('serves a repeated resolve from the cache with identical results', async () => {
+    const r = router(routes, ['en', 'pl', 'cs']);
+    const cache = new MemoryCache();
+    const first = await resolveTopic(request, { ...r.options, cache, now: at('2026-09-23T12:00:00Z') });
+    expect(r.calls).toHaveLength(3);
+    const second = await resolveTopic(request, { ...r.options, cache, now: at('2026-09-29T12:00:00Z') });
+    expect(r.calls).toHaveLength(3);
+    expect(second).toEqual(first);
+  });
+
+  it('re-fetches after the TTL', async () => {
+    const r = router(routes, ['en', 'pl', 'cs']);
+    const cache = new MemoryCache();
+    await resolveTopic(request, { ...r.options, cache, now: at('2026-09-23T12:00:00Z') });
+    const later = new Date(Date.parse('2026-09-23T12:00:00Z') + RESOLVER_CACHE_TTL_MS + 1);
+    await resolveTopic(request, { ...r.options, cache, now: () => later });
+    expect(r.calls).toHaveLength(6);
+  });
+
+  it('does not cache MediaWiki errors', async () => {
+    const r = router({ 'en|lookup|x': { error: { code: 'badvalue', info: 'Unrecognized value' } } }, ['en']);
+    const cache = new MemoryCache();
+    await expectError(resolveTopic({ topic: 'x', languages: ['pl'] }, { ...r.options, cache }), 'BAD_REQUEST');
+    expect(cache.entries.size).toBe(0);
   });
 });
 

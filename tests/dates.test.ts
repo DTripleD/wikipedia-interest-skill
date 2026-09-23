@@ -1,5 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { fromApiTimestamp, isIsoDate, toApiDate, todayUtc } from '../src/dates.js';
+import {
+  addDays,
+  daysInMonth,
+  daysInclusive,
+  eachDay,
+  fromApiTimestamp,
+  isIsoDate,
+  toApiDate,
+  todayUtc,
+} from '../src/dates.js';
+
+describe('date arithmetic', () => {
+  it('adds days across month, year and leap-day boundaries', () => {
+    expect(addDays('2024-02-28', 1)).toBe('2024-02-29');
+    expect(addDays('2024-02-29', 1)).toBe('2024-03-01');
+    expect(addDays('2024-12-31', 1)).toBe('2025-01-01');
+    expect(addDays('2024-01-01', -1)).toBe('2023-12-31');
+  });
+
+  it('counts and lists days inclusively', () => {
+    expect(daysInclusive('2024-01-01', '2024-01-01')).toBe(1);
+    expect(daysInclusive('2024-01-01', '2024-12-31')).toBe(366);
+    expect(daysInclusive('2024-01-02', '2024-01-01')).toBe(0);
+    expect(eachDay('2024-02-27', '2024-03-01')).toEqual(['2024-02-27', '2024-02-28', '2024-02-29', '2024-03-01']);
+    expect(eachDay('2024-01-02', '2024-01-01')).toEqual([]);
+  });
+
+  it('knows month lengths', () => {
+    expect(daysInMonth('2024-02')).toBe(29);
+    expect(daysInMonth('2023-02')).toBe(28);
+    expect(daysInMonth('2024-04-15')).toBe(30);
+  });
+
+  it('rejects invalid dates', () => {
+    expect(() => addDays('2024-02-30', 1)).toThrow(RangeError);
+  });
+});
 
 describe('isIsoDate', () => {
   it('accepts real dates, including leap days', () => {

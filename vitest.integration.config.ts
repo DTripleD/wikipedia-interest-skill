@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/integration/**/*.live.test.ts'],
+    setupFiles: ['tests/integration/setup.ts'],
     environment: 'node',
     testTimeout: 60_000,
     // Run files sequentially to respect Wikimedia request etiquette.

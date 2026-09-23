@@ -10,7 +10,7 @@
  * Only the `version` command exists in Stage 1; resolve/fetch/analyze/chart/report are added later.
  */
 import { pathToFileURL } from 'node:url';
-import { TOOL_NAME, TOOL_VERSION, getUserAgent } from './config.js';
+import { TOOL_NAME, TOOL_VERSION, getUserAgent, loadDotEnv } from './config.js';
 
 export type CliResult =
   | { ok: true; command: string; data: unknown }
@@ -41,6 +41,7 @@ export function run(argv: readonly string[]): CliResult {
 }
 
 function main(): void {
+  loadDotEnv();
   const result = run(process.argv.slice(2));
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   process.exitCode = result.ok ? 0 : 1;

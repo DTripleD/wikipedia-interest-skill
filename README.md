@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–3 (project setup, Pageviews API client, article resolver) are complete. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–4 (project setup, Pageviews API client, article resolver, data model and caching) are complete. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Architecture (summary)
@@ -32,6 +32,8 @@ src/
   cli.ts          JSON-in/JSON-out command interface for the agent
   wikipedia/      shared HTTP layer (http.ts), language editions (languages.ts),
                   Pageviews API client (api.ts), topic → article resolver (resolver.ts)
+  data/           daily series model and monthly aggregation (series.ts),
+                  file cache (cache.ts), cached incremental fetching (pageviews.ts)
   analysis/       trends, outliers, confidence                  (Stage 5–6)
   charts/         Vega-Lite → SVG                               (Stage 7)
   reports/        one-page PDF via PDFKit                       (Stage 8)
@@ -56,9 +58,35 @@ npm run build
 
 ## Configuration
 
+Settings are read from environment variables. You can also put them in a `.env` file at
+the project root:
+
+```bash
+cp .env.example .env   # then edit WIKI_SKILL_CONTACT
+```
+
+- The file is loaded with Node's built-in `process.loadEnvFile`, with no extra dependency.
+  The CLI and the live tests (`npm run test:integration`) load it. Unit tests do not.
+- It is always read from the project root, whatever the current working directory is.
+- Variables already set in the shell take precedence over the file.
+- `.env` is gitignored. Only `.env.example` is committed.
+
 | Variable             | Purpose                                                                                                                                       |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `WIKI_SKILL_CONTACT` | Contact info (an email or a full URL) sent in the User-Agent, as the [Wikimedia User-Agent policy](https://meta.wikimedia.org/wiki/User-Agent_policy) requires. **Set this before making real requests.** Without real contact info, Wikimedia may treat the client as "unidentified" and limit it to 10 requests/minute (HTTP 429). |
+| `WIKI_SKILL_CACHE_DIR` | Cache directory. If unset, `.cache/` in the project root is used. Relative paths are resolved against the project root. An empty value disables caching. |
+
+### Caching
+
+Pageviews and resolver lookups are cached as JSON files, so repeated analyses make few or no
+Wikimedia requests.
+
+- **Pageviews:** each article's daily series is cached once and extended as needed. Only
+  missing days are fetched. Days older than 3 days are treated as final. More recent days are
+  re-fetched once the cached copy is older than 4 hours.
+- **Resolver:** MediaWiki API responses (titles, redirects, interlanguage links, search) are
+  kept for 7 days.
+- Errors are never cached. You can delete the cache directory at any time.
 
 ## Usage
 

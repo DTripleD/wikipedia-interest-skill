@@ -29,6 +29,36 @@ export function fromApiTimestamp(timestamp: string): string | null {
   return isIsoDate(iso) ? iso : null;
 }
 
+const DAY_MS = 86_400_000;
+
+function toUtcMs(isoDate: string): number {
+  if (!isIsoDate(isoDate)) throw new RangeError(`Invalid ISO date: "${isoDate}"`);
+  return Date.parse(`${isoDate}T00:00:00Z`);
+}
+
+/** `addDays('2024-02-28', 2)` → `2024-03-01`. Negative values go back in time. */
+export function addDays(isoDate: string, days: number): string {
+  return new Date(toUtcMs(isoDate) + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** Number of days in the inclusive range; 0 if `end` is before `start`. */
+export function daysInclusive(start: string, end: string): number {
+  return Math.max(0, Math.round((toUtcMs(end) - toUtcMs(start)) / DAY_MS) + 1);
+}
+
+/** Every date from `start` to `end`, inclusive. */
+export function eachDay(start: string, end: string): string[] {
+  const days: string[] = [];
+  for (let d = start; d <= end; d = addDays(d, 1)) days.push(d);
+  return days;
+}
+
+/** Days in the calendar month of `YYYY-MM` (or of a `YYYY-MM-DD` date). */
+export function daysInMonth(month: string): number {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
 /** Current UTC date as `YYYY-MM-DD`. */
 export function todayUtc(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);

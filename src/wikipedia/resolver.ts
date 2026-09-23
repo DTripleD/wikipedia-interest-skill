@@ -17,7 +17,12 @@
  * returns mostly unrelated pages (verified), so such results are only "candidates".
  * Titles returned in `article` are canonical (redirect targets), because the Pageviews API
  * counts views of redirect titles separately from the target article.
+ *
+ * With `options.cache`, successful Action API responses are cached for RESOLVER_CACHE_TTL_MS
+ * (keyed by request URL). The Action API has the tightest rate limit, so repeated
+ * analyses of the same topic should not hit it again. Errors are never cached.
  */
+import { isFresh, type JsonCache } from '../data/cache.js';
 import { WikimediaApiError, readJson, requestWithRetry, type HttpOptions } from './http.js';
 import { actionApiUrl, toEdition } from './languages.js';
 
@@ -81,7 +86,14 @@ export interface ResolveResult {
   results: LanguageResolution[];
 }
 
-export type ResolverOptions = HttpOptions;
+export interface ResolverOptions extends HttpOptions {
+  /** Cache for Action API responses; null or omitted disables caching. */
+  cache?: JsonCache | null;
+}
+
+/** Titles, redirects and interlanguage links change rarely: 7 days. */
+export const RESOLVER_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const CACHE_NAMESPACE = 'mediawiki';
 
 const SERVICE = 'MediaWiki API';
 const MAX_TOPIC_LENGTH = 255;
@@ -364,6 +376,11 @@ function safeEdition(lang: string): string | null {
 async function callApi(ctx: Ctx, edition: string, params: Record<string, string>): Promise<Record<string, unknown>> {
   const query = new URLSearchParams({ action: 'query', format: 'json', formatversion: '2', ...params });
   const url = `${actionApiUrl(edition)}?${query.toString()}`;
+  const cache = ctx.options.cache ?? null;
+  const now = ctx.options.now?.() ?? new Date();
+  const cached = cache?.get(CACHE_NAMESPACE, url);
+  if (cached && isObject(cached.value) && isFresh(cached.storedAt, RESOLVER_CACHE_TTL_MS, now)) return cached.value;
+
   const response = await requestWithRetry(url, ctx.options, { service: SERVICE });
   const body = await readJson(response, ctx.options, SERVICE);
   if (!isObject(body)) throw invalidResponse('body is not an object.');
@@ -371,6 +388,7 @@ async function callApi(ctx: Ctx, edition: string, params: Record<string, string>
     const info = typeof body['error']['info'] === 'string' ? body['error']['info'] : 'unknown error';
     throw new WikimediaApiError('BAD_REQUEST', `${SERVICE} error on ${edition}.wikipedia: ${info}`);
   }
+  cache?.set(CACHE_NAMESPACE, url, body, now);
   return body;
 }
 
