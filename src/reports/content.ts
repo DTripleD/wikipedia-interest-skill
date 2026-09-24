@@ -45,6 +45,11 @@ export interface ReportInput {
   generatedAt: Date;
 }
 
+export interface ReportChart {
+  id: 'timeline' | 'comparison' | 'yoy';
+  spec: TopLevelSpec;
+}
+
 export interface ReportModel {
   title: string;
   subtitle: string;
@@ -54,8 +59,8 @@ export interface ReportModel {
   analystNote: string | null;
   confidence: { level: ConfidenceLevel; reasons: string[] };
   limitations: string[];
-  /** One or two chart specs, top to bottom. */
-  charts: TopLevelSpec[];
+  /** One or two charts, top to bottom. */
+  charts: ReportChart[];
   /** Non-fatal problems (rows omitted, characters the font cannot draw). */
   warnings: string[];
 }
@@ -99,12 +104,12 @@ export function buildReportModel(input: ReportInput): ReportModel {
   const limitations = [...(single ? assessment.members[0]!.caveats : assessment.caveats)];
   if (imputed > 0) limitations.push(`Days the API reported no views for are counted as zero (${imputed} day(s) in total).`);
 
-  const charts = single
-    ? [timelineSpec(sliceSeries(input.series[0]!, start, end), analyses[0]!, { height: 150 })]
-    : [comparisonSpec(comparison, { height: 150 })];
+  const charts: ReportChart[] = single
+    ? [{ id: 'timeline', spec: timelineSpec(sliceSeries(input.series[0]!, start, end), analyses[0]!, { height: 150 }) }]
+    : [{ id: 'comparison', spec: comparisonSpec(comparison, { height: 150 }) }];
   const yoy = yoySpec(analyses, { width: Math.min(110, Math.floor(480 / analyses.length) - 30), height: 100 });
-  if (yoy) charts.push(yoy);
-  for (const spec of charts) {
+  if (yoy) charts.push({ id: 'yoy', spec: yoy });
+  for (const { spec } of charts) {
     const bad = missingGlyphs(JSON.stringify(spec));
     if (bad.length > 0) warnings.push(`The embedded font cannot draw some characters in a chart: ${bad.join(' ')}`);
   }

@@ -30,14 +30,14 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 6  | Confidence / evidence model             | ✅ done     |
 | 7  | Charts                                  | ✅ done     |
 | 8  | Report generation (one-page PDF)        | ✅ done     |
-| 9  | CLI / tool interface                    | ⏭ next      |
-| 10 | SKILL.md                                | pending     |
+| 9  | CLI / tool interface                    | ✅ done     |
+| 10 | SKILL.md                                | ⏭ next      |
 | 11 | End-to-end scenarios                    | pending     |
 | 12 | Cheap-model evaluation (Haiku 4.5)      | pending     |
 | 13 | Edge cases and robustness               | pending     |
 | 14 | Final cleanup                           | pending     |
 
-**Current stage:** Stage 8 is complete and awaiting review/commit (it also contains the Stage 7 axis-cap follow-up). Stage 9 comes next.
+**Current stage:** Stage 9 is complete and awaiting review/commit. Stage 10 (SKILL.md) comes next.
 
 ## Decisions made (with the user)
 
@@ -49,7 +49,7 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
   - Native deps such as `canvas` are avoided on purpose: the repo lives under a OneDrive path with Cyrillic characters, where native builds on Windows are fragile.
 - **User-Agent:** `wikipedia-interest-skill/<version> (<contact>)`. The contact comes from `WIKI_SKILL_CONTACT`; the fallback is a neutral placeholder (see `src/config.ts`).
 - **`.env` support (added before Stage 4):** `loadDotEnv()` in `src/config.ts` wraps Node's native `process.loadEnvFile` (no dotenv). It always reads the project-root `.env` (resolved from `import.meta.url`, independent of cwd). Shell variables win over the file, and a missing file is ignored. It is called only in the CLI `main()` (so `run()` stays pure) and in `tests/integration/setup.ts`. Unit tests never load it. `.env.example` is committed; `.env` is gitignored.
-- **CLI contract:** every command prints exactly one JSON envelope to stdout. On success: `{ok:true, command, data}`. On failure: `{ok:false, command, error:{code, message}}`. Exit code is 0 or 1. Outputs stay compact (metrics and file paths, never raw series) so a cheap model can use them.
+- **CLI contract:** every command prints exactly one JSON envelope (one line) to stdout. On success: `{ok:true, command, data}`. On failure: `{ok:false, command, error:{code, message, details?}}` (`details` added in Stage 9, e.g. candidate titles). Exit code is 0 or 1. Outputs stay compact (metrics and file paths, never raw series) so a cheap model can use them.
 - **Stage 12 evaluation** will be run **manually by the user in Claude Code with Haiku 4.5**. The project supplies scenarios, a checklist and a results template.
 - **Documentation language:** English.
 - **Shared HTTP layer (approved in Stage 3):** retry, timeout, `Retry-After`, User-Agent and error mapping live in `src/wikipedia/http.ts` and are used by both the Pageviews client and the resolver. `PageviewsApiError` remains as an alias of `WikimediaApiError`.
@@ -206,6 +206,23 @@ Decisions (agreed with the user): weakest-link aggregation; level-shift and seas
 - uk `Астрономія` → **medium**: a step at the same point (48 → 13.5/day), low volume (median 20/day), no seasonality detected.
 - The cs edition total also dropped ~20 % in June 2025. Treat any mid-2025 step on cs/uk articles as partly platform-wide.
 
+### CLI (Stage 9) — `src/cli.ts`, `src/commands/`
+
+Decisions (agreed with the user): commands `resolve` / `analyze` / `report` (no separate fetch/chart steps; the cache makes repeats cheap); an unresolved topic is an error with candidates in `error.details`; percentages are numbers already ×100 in fields ending in `Pct`.
+
+- **Usage:** `node dist/cli.js <command> [options]` (`npm run cli -- ...`, bin `wiki-interest`). `help` lists the options.
+  - Common: `--topic` (source-language title, default source `en`), `--languages pl,cs`, `[--source en]`, `[--title <lang>=<Title> ...]` (explicit article; repeatable), `[--no-cache]`.
+  - `analyze` / `report`: `[--months 24 | --start YYYY-MM-DD] [--end YYYY-MM-DD]` (default: 24 calendar months ending yesterday UTC; `--months` 1–120, not together with `--start`), `[--charts]` (also write SVGs), `[--out DIR]` (default `<project>/output`).
+  - `report`: `[--note "..."]` (analyst note, ≤ 600 characters).
+- **`args.ts`:** strict `node:util parseArgs`; every problem is `CliError('INVALID_ARGUMENT', message-with-fix)`.
+- **`pipeline.ts`:** `makeContext(deps, noCache)` wraps `fetch` to count every HTTP request (`apiRequests`, retries included), opens the file cache unless disabled, and warns when `WIKI_SKILL_CONTACT` is not set. `analyze()`: resolve → for each resolved language, cached daily series + edition totals → `compareLanguages` → `assessComparison` with the resolver's confidence/notes. Unresolved languages become `missing` (reason: "no article linked to the topic", `no article titled "X"`, "the title is a disambiguation page", "edition does not exist"; plus candidate titles). If none resolved: `TOPIC_AMBIGUOUS` / `TOPIC_NOT_FOUND` (`details.candidates` = `{title, description}`) or `NO_ARTICLES` (`details.missing`).
+- **`present.ts`:** compact output. Per language (in ranking order): `rank, language, article, resolution{confidence, method, notes?}, totalViews, dailyMean, dailyMedian, viewsPerMillion, peakDay, yoyChangePct, yoyChangeExcludingSpikesPct, recent90ChangePct, trend{direction, perYearPct, significance, basis, periods}, levelShift{between, fromPerDay, toPerDay, editionChangePct}|null, seasonality, spikes{outlierDays, excessViewsSharePct, largest?}, imputedDays, confidence{level, reasons, trend, yearOverYear, recentVsPrevious}`. Top level: `topic, sourceArticle, period, rankedBy, languages, comparison.ranking` (2+ languages), `missing, confidence, findings, limitations` (the last three from `buildReportModel`, identical to the PDF), `files?, warnings?, apiRequests, cache`. The live cs/pl analysis is ≈ 2.8 KB of JSON.
+- **`commands.ts`:** files are named `<topic-slug>_<sorted-langs>_<start>_<end>` + `.pdf` or `-<chart id>.svg` (chart ids: `timeline` | `comparison` | `yoy`; `ReportModel.charts` now carries the id).
+- **Errors:** `CliError` codes as above; Wikimedia codes pass through (`RATE_LIMITED`, `TIMEOUT`, …; `INVALID_INPUT` → `INVALID_ARGUMENT`); `RangeError` → `INVALID_ARGUMENT`; anything else → `INTERNAL_ERROR`.
+- **Tests:** `tests/cli.test.ts` with `tests/helpers/fake-wikimedia.ts` (URL-routed fake Action API + Pageviews API): arguments, period arithmetic, file names, resolve, analyze (ranking, rounding, compactness, cache on/off), `--charts`, ambiguous/not-found/no-article errors, 429 pass-through, report PDF, note validation.
+- **Source language (found by the user, 2026-09-25):** `--topic` is looked up in the `--source` edition (default `en`). `report --topic "Море" --languages cs,uk,pl` fails with `TOPIC_NOT_FOUND` (candidates are unrelated English search hits); `--source uk` works (cs `Moře`, pl `Morze`, uk `Море`). The `TOPIC_NOT_FOUND` message now says to re-run with `--source <lang>` or an English title.
+- **Live check (2026-09-25):** `analyze --topic "Intermittent fasting" --languages pl,cs` → cs 6 716 views, 4.41 per million, YoY −54.4 %, medium; pl missing. `analyze --topic "learning English"` → `TOPIC_AMBIGUOUS` with 5 candidates. `report --topic Astronomy --languages uk` → PDF written.
+
 ### Report (Stage 8) — `src/reports/`, `src/fonts.ts`, `assets/fonts/`
 
 Decisions (agreed with the user): findings are templated by code, plus an optional short analyst note from the agent (labelled "written by the AI agent, not computed"); Noto Sans TTF committed in the repo; A4.
@@ -231,8 +248,8 @@ Decisions (agreed with the user): three charts (timeline, language comparison, y
   - `yoySpec(analyses, size?)`: one small panel per series (facet, independent y scales, because editions differ by orders of magnitude). Each panel has prior-vs-last-365-day average daily views and the relative change label. Series without YoY are listed in the subtitle. Returns null if none has YoY.
   - **Rules:** specs contain only precomputed values — no Vega-Lite `aggregate/transform/bin/timeUnit/impute/window` (a unit test enforces this). Every chart title/subtitle carries "Wikipedia attention, not market demand." All time axes use a UTC scale.
 - **`render.ts`:** `renderSvg(spec)` compiles with Vega-Lite and renders with `new vega.View(..., {renderer: 'none'}).toSVG()`. `toChart(spec)` → `{spec, svg}`.
-- **`text-metrics.ts`:** without canvas, Vega estimates text as 0.8 em per character, which made SVGs ~40 % too wide and pushed plots down (rotated axis titles). `render.ts` installs `vegaTextWidth` into Vega's `textMetrics.width` hook (the hook vl-convert uses; not in Vega's typings). It uses Helvetica AFM widths for ASCII and case-based estimates for other characters.
-- **`theme.ts`:** the dataviz reference palette, light mode (the categorical order passed the palette validator's adjacent-pair CVD/normal-vision checks), recessive gray axes/grid, font `Helvetica, Arial, sans-serif` (PDFKit has Helvetica built in).
+- **`text-metrics.ts`:** without canvas, Vega estimates text as 0.8 em per character, which made SVGs ~40 % too wide and pushed plots down (rotated axis titles). `render.ts` installs `vegaTextWidth` into Vega's `textMetrics.width` hook (the hook vl-convert uses; not in Vega's typings). Since Stage 8 it measures with the embedded Noto Sans (see "Fonts" below).
+- **`theme.ts`:** the dataviz reference palette, light mode (the categorical order passed the palette validator's adjacent-pair CVD/normal-vision checks), recessive gray axes/grid, font `Noto Sans, Helvetica, Arial, sans-serif`.
 - **`analyzeSeries` addition:** `dailyAxisCap = {cap, clippedDays[]}` with cap = ⌈`AXIS_CAP_FACTOR` (3) × highest 28-day average⌉, or null when no day exceeds it (or the series is shorter than 28 days). It is a display aid, computed in the analysis layer so the chart computes nothing.
 - **`renderSvg`** calls `vega.resetSVGDefIds()` first: clip-path ids come from a global counter, and the reset keeps the output byte-for-byte reproducible.
 - **Shared helpers added:** `seriesLabels(analyses)` in `compare.ts` (`cs`, or `cs:Title` when an edition repeats; used by confidence and charts) and `src/format.ts` (`formatNumber`, `formatPercent`, `formatSignedPercent`, `formatPValue`; moved out of `confidence.ts`).
@@ -241,8 +258,7 @@ Decisions (agreed with the user): three charts (timeline, language comparison, y
 
 ## Planned design (not yet implemented; revisit in each stage)
 
-- **CLI (Stage 9), report command:** build `compareLanguages` + `assessComparison(…, resolutions)` and call `generateReport({topic, comparison, assessment, series, missing, analystNote, generatedAt})`; write `pdf` to `output/` and return the path plus `model.warnings`. Map resolver results with status ≠ resolved to `missing` with short reasons (they are truncated in the table, shown in full under Findings). The analyst note is optional, ≤ 600 characters.
-- **CLI (Stage 9):** pass each language's resolver result to `assessSeries` / `assessComparison`. Output the level, reasons, claims and caveats. Factor `value`s are optional (round them). warn when `WIKI_SKILL_CONTACT` is not set. Wire `openCache()` into resolve/fetch, add `--no-cache`, and report `apiRequests` in the output. Fetch edition totals for normalization (1 extra request per language, cached). Round numbers and drop large arrays from the JSON.
+- **SKILL.md (Stage 10):** the agent must detect the language the user wrote the topic in and pass `--source <lang>` (or translate the topic to its English Wikipedia title); never run a non-English topic against the default `en` source. The workflow is resolve (only when unsure) → analyze → report. Map resolver notes that say `titles.<lang>` to the CLI flag `--title <lang>=<Title>`. On `TOPIC_AMBIGUOUS` / `TOPIC_NOT_FOUND`, show the candidates and ask the user; never pick one. Quote numbers from the JSON; never compute. Always pass on `limitations[0]` (attention ≠ demand) and the confidence level with reasons.
 - Generated artifacts go to `output/` (gitignored).
 
 ## Current layout
@@ -250,7 +266,11 @@ Decisions (agreed with the user): three charts (timeline, language comparison, y
 ```
 src/config.ts                  User-Agent / contact configuration, .env loading
 src/dates.ts                   UTC ISO-date helpers
-src/cli.ts                     CLI entry; exported run(argv) is pure and testable; only `version` exists
+src/cli.ts                     CLI entry; async run(argv, deps) returns the envelope; commands version/help/resolve/analyze/report
+src/commands/args.ts           argument parsing and validation (CliError)
+src/commands/pipeline.ts       context (counted fetch, cache, warnings), resolve, analyze pipeline, unresolved-topic errors
+src/commands/present.ts        compact JSON for the agent (rounding, Pct fields)
+src/commands/commands.ts       resolve/analyze/report handlers, chart/PDF files in output/
 src/wikipedia/http.ts          shared HTTP layer (retry, timeout, errors)
 src/wikipedia/languages.ts     edition codes / aliases, URL helpers
 src/wikipedia/api.ts           Pageviews API client (per-article + aggregate/edition totals)
@@ -275,7 +295,8 @@ src/reports/content.ts         report model: table rows, templated findings, con
 src/reports/pdf.ts             one-page A4 layout with PDFKit + svg-to-pdfkit; generateReport
 assets/fonts/                  NotoSans-Regular.ttf, NotoSans-Bold.ttf (unhinted, v2.015) + OFL.txt
 docs/wikimedia-api.md          verified Wikimedia API behavior + sources
-tests/*.test.ts                config, CLI, date helper tests
+tests/*.test.ts                config, CLI (fake Wikimedia), date helper, font tests
+tests/helpers/fake-wikimedia.ts  URL-routed fake of the Action API and Pageviews API for CLI tests
 tests/wikipedia/*.test.ts      http, languages, api, resolver unit tests (scripted fetch, no network)
 tests/data/*.test.ts           series, cache, getDailySeries unit tests (fake API, MemoryCache)
 tests/helpers/memory-cache.ts  in-memory JsonCache for tests
@@ -296,8 +317,9 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 
 ## Known limitations
 
-- The CLI has only `version`. The client and resolver are not yet exposed through the CLI (Stage 9).
-- The cache, analytics, confidence model, charts and report are not yet used by any command, because the CLI (Stage 9) does not exist yet.
+- CLI: requests are sequential (per language: article series + edition totals); 20 languages without cache take ~40+ requests. Edition totals are always fetched (normalization); a failure there fails the command.
+- CLI: `analyze`/`report` re-run the resolver each time (cached for 7 days). There is no separate fetch/chart command; SVGs come from `--charts`.
+- CLI: the resolver's notes mention `titles.<lang>`; the matching CLI flag is `--title <lang>=<Title>` (SKILL.md must say so).
 - The Mann–Kendall test assumes independent observations. Monthly averages are still autocorrelated, so p-values are somewhat optimistic. Weekly-basis trends (short periods) are the most affected.
 - The trend is monotonic/linear only. Level shifts and seasonality are *flagged* (Stage 6), not modelled: the trend is still one Theil–Sen line.
 - Confidence thresholds are explicit, documented heuristics (`CONFIDENCE_THRESHOLDS`), not calibrated probabilities. They were checked on the assignment's cs/uk data only.
@@ -328,4 +350,4 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 
 ## Remaining work
 
-Stages 6–14 (see the table above).
+Stages 10–14 (see the table above).

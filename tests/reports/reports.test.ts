@@ -55,7 +55,8 @@ describe('buildReportModel', () => {
 
     expect(m.limitations[0]).toBe(DEMAND_CAVEAT);
     expect(m.charts).toHaveLength(2);
-    expect(JSON.stringify(m.charts[0])).toContain('Interest by language');
+    expect(m.charts.map((c) => c.id)).toEqual(['comparison', 'yoy']);
+    expect(JSON.stringify(m.charts[0]!.spec)).toContain('Interest by language');
     expect(m.analystNote).toBeNull();
     expect(m.warnings).toEqual([]);
   });
@@ -73,7 +74,8 @@ describe('buildReportModel', () => {
     const levels = Array.from({ length: 24 }, (_, k) => (k < 15 ? 280 : 60) + wiggle(k, 10));
     const m = buildReportModel(input([{ series: monthlySeries('2023-01', levels, { language: 'uk', project: 'uk.wikipedia', article: 'Астрономія' }) }], { topic: 'astronomy' }));
     expect(m.subtitle).toMatch(/^Wikipedia edition: uk · /);
-    expect(JSON.stringify(m.charts[0])).toContain('Астрономія — uk.wikipedia');
+    expect(m.charts.map((c) => c.id)).toEqual(['timeline', 'yoy']);
+    expect(JSON.stringify(m.charts[0]!.spec)).toContain('Астрономія — uk.wikipedia');
     expect(m.findings[0]).toMatch(/^uk: decreasing .*abrupt change between 2024-03 and 2024-04\.$/);
     expect(m.findings[1]).toMatch(/^Typical day: \d+ views \(median\); busiest day \d{4}-\d{2}-\d{2} with \d+ views\.$/);
     expect(m.table.rows[0]![4]).toBe('—'); // no edition data

@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–8 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report) are complete. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–9 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report, CLI) are complete. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Architecture (summary)
@@ -146,15 +146,48 @@ Wikimedia requests.
 ## Usage
 
 ```bash
-node dist/cli.js version
+# Which article does each language edition have for the topic?
+node dist/cli.js resolve --topic "Intermittent fasting" --languages pl,cs
+
+# Analyze the last 24 months (default) and get metrics, confidence and findings
+node dist/cli.js analyze --topic "Intermittent fasting" --languages pl,cs
+
+# Same, plus a one-page PDF report in output/ (and SVG charts with --charts)
+node dist/cli.js report --topic "Astronomy" --languages uk --note "Optional short analyst note"
+
+node dist/cli.js help     # all options
 ```
 
-Every command prints one JSON object to stdout:
+Options:
+
+| Option | Meaning |
+| --- | --- |
+| `--topic` | The topic as an article title in the source language. |
+| `--languages` | Comma-separated edition codes. |
+| `--source` | The source language. Default `en`. |
+| `--title <lang>=<Title>` | Use a known article instead of the interlanguage link. Repeatable. |
+| `--months N` or `--start` | The analysis period. |
+| `--end` | The last day. Default yesterday (UTC). |
+| `--charts` | Also write SVG charts. |
+| `--out DIR` | The output directory. |
+| `--note` | A short analyst note for the report. |
+| `--no-cache` | Do not use the cache. |
+
+Every command prints one JSON object on one line to stdout:
 
 ```json
-{ "ok": true, "command": "version", "data": { ... } }
-{ "ok": false, "command": "x", "error": { "code": "UNKNOWN_COMMAND", "message": "..." } }
+{ "ok": true, "command": "analyze", "data": { "languages": [...], "confidence": {...}, "findings": [...], "limitations": [...], "apiRequests": 3 } }
+{ "ok": false, "command": "analyze", "error": { "code": "TOPIC_AMBIGUOUS", "message": "...", "details": { "candidates": [...] } } }
 ```
+
+- The JSON contains no raw series.
+- Numbers are rounded.
+- Percentages are already multiplied by 100 (fields ending in `Pct`).
+- Error codes include:
+  - `INVALID_ARGUMENT`;
+  - `TOPIC_AMBIGUOUS`, `TOPIC_NOT_FOUND`, `NO_ARTICLES`;
+  - Wikimedia errors such as `RATE_LIMITED` and `TIMEOUT`;
+  - `INTERNAL_ERROR`.
 
 ## Scripts
 

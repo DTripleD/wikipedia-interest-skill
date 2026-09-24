@@ -50,7 +50,7 @@ export interface Report {
 /** Builds the report content and renders it to a PDF buffer. */
 export async function generateReport(input: ReportInput): Promise<Report> {
   const model = buildReportModel(input);
-  const svgs = await Promise.all(model.charts.map((spec) => renderSvg(spec)));
+  const svgs = await Promise.all(model.charts.map((chart) => renderSvg(chart.spec)));
   const { pdf, warnings } = await renderReportPdf(model, svgs, input.generatedAt);
   return { pdf, model: { ...model, warnings: [...model.warnings, ...warnings] } };
 }
