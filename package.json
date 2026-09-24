@@ -23,5 +23,9 @@
     "@types/node": "^22.20.4",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
+  },
+  "dependencies": {
+    "vega": "^6.4.0",
+    "vega-lite": "^6.4.3"
   }
 }

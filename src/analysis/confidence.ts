@@ -15,8 +15,9 @@
  */
 import type { ResolutionConfidence } from '../wikipedia/resolver.js';
 import type { AnalyzedComparison, SeriesAnalysis } from './analyze.js';
-import type { LanguageComparison } from './compare.js';
+import { seriesLabels, type LanguageComparison } from './compare.js';
 import { addDays } from '../dates.js';
+import { formatNumber as fmt, formatPercent as pct, formatPValue as pValue, formatSignedPercent as signedPct } from '../format.js';
 import { SIGNIFICANCE_LEVEL } from './trends.js';
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
@@ -358,7 +359,8 @@ export function assessComparison(
   const perMillion = comparison.ranking.byViewsPerMillion;
   const basis = perMillion ? 'views_per_million' : 'total_views';
   const ranking = perMillion ?? comparison.ranking.byTotalViews;
-  const name = (i: number): string => label(analyses, i);
+  const labels = seriesLabels(analyses);
+  const name = (i: number): string => labels[i]!;
 
   const factors: Factor[] = [
     perMillion
@@ -447,28 +449,4 @@ function cap(level: ConfidenceLevel, max: ConfidenceLevel): ConfidenceLevel {
 function capByData(claim: ClaimConfidence, dataLevel: ConfidenceLevel): ClaimConfidence {
   if (LEVEL_RANK[claim.level] <= LEVEL_RANK[dataLevel]) return claim;
   return { level: dataLevel, reasons: [...claim.reasons, `Limited by the ${dataLevel} data confidence (see reasons).`] };
-}
-
-function label(analyses: readonly SeriesAnalysis[], i: number): string {
-  const a = analyses[i]!;
-  const sameLanguage = analyses.filter((x) => x.language === a.language).length > 1;
-  return sameLanguage && a.article !== null ? `${a.language}:${a.article.replaceAll('_', ' ')}` : a.language;
-}
-
-/** 1234.5 → "1235", 9.25 → "9.3", 0.5 → "0.5". */
-function fmt(x: number): string {
-  return Math.abs(x) >= 100 ? String(Math.round(x)) : String(Math.round(x * 10) / 10);
-}
-
-function pct(share: number): string {
-  return `${Math.round(share * 100)}%`;
-}
-
-function signedPct(change: number): string {
-  const v = Math.round(change * 100);
-  return `${v > 0 ? '+' : ''}${v}%`;
-}
-
-function pValue(p: number): string {
-  return p < 0.001 ? 'p < 0.001' : `p = ${p < 0.01 ? p.toFixed(3) : p.toFixed(2)}`;
 }

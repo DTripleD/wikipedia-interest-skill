@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–6 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model) are complete. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–7 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts) are complete. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Architecture (summary)
@@ -37,7 +37,8 @@ src/
   analysis/       statistics, trends (Theil–Sen, Mann–Kendall), outliers (Hampel),
                   level shifts (Pettitt) and seasonality, per-series analysis,
                   cross-language comparison, evidence-based confidence (high/medium/low)
-  charts/         Vega-Lite → SVG                               (Stage 7)
+  charts/         Vega-Lite specs → SVG in Node: timeline, language comparison,
+                  year over year (no statistics computed in the chart layer)
   reports/        one-page PDF via PDFKit                       (Stage 8)
 docs/             verified external API behavior (docs/wikimedia-api.md)
 tests/            Vitest unit tests (deterministic, no network)
@@ -67,6 +68,19 @@ ranking holds month by month. Thresholds live in `CONFIDENCE_THRESHOLDS` in
 
 The confidence describes how reliable the numbers are **as a measure of Wikipedia attention**.
 Every assessment carries the caveat that pageviews are not market demand.
+
+## Charts
+
+Three static SVG charts are built from the analysis results (Vega-Lite, rendered in Node
+without a browser or canvas):
+
+- **Timeline:** daily views, 28-day average, Theil–Sen trend line, and a marker for an
+  abrupt level shift.
+- **Interest by language:** monthly views per million edition pageviews (or average daily
+  views when edition totals are missing), one line per language.
+- **Year over year:** the prior vs the last 365 days for each language, with the change.
+
+Every chart states that pageviews show Wikipedia attention, not market demand.
 
 ## Requirements
 

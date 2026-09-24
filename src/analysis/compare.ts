@@ -78,6 +78,17 @@ function rank(analyses: readonly SeriesAnalysis[], value: (a: SeriesAnalysis) =>
   return rows.map((r) => ({ ...r, relativeToLeader: leader === 0 ? null : r.value / leader }));
 }
 
+/**
+ * Short display label for each analysis: the edition code (`cs`), or `cs:Article title` when
+ * the same edition appears more than once.
+ */
+export function seriesLabels(analyses: readonly SeriesAnalysis[]): string[] {
+  return analyses.map((a) => {
+    const sameLanguage = analyses.filter((x) => x.language === a.language).length > 1;
+    return sameLanguage && a.article !== null ? `${a.language}:${a.article.replaceAll('_', ' ')}` : a.language;
+  });
+}
+
 function label(series: PageviewSeries): string {
   return series.article === null ? series.project : `${series.project}/${series.article}`;
 }
