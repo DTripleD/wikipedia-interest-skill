@@ -4,6 +4,8 @@ import { compareLanguages } from '../../src/analysis/compare.js';
 import { MAX_COMPARISON_LINES, comparisonSpec, timelineSpec, yoySpec } from '../../src/charts/charts.js';
 import { renderSvg, toChart } from '../../src/charts/render.js';
 import { CATEGORICAL } from '../../src/charts/theme.js';
+import { addDays } from '../../src/dates.js';
+import { missingGlyphs } from '../../src/fonts.js';
 import { monthlySeries, seriesOf } from '../helpers/series.js';
 
 // The specs are plain JSON; these helpers dig into them without the Vega-Lite union types.
@@ -34,13 +36,33 @@ describe('timelineSpec', () => {
       { date: '2024-01-15', value: analysis.trend.fittedStart },
       { date: '2025-12-15', value: analysis.trend.fittedEnd },
     ]);
-    expect(values(rule!)).toEqual([{ date: '2025-04-01', label: 'Step ≈ 290 → 50/day' }]);
+    expect(values(rule!)).toEqual([{ date: '2025-04-01', label: 'Step: 290 to 50/day' }]);
     expect(text!.encoding.text).toEqual({ field: 'label' });
 
     expect((spec as Json).title).toEqual({
       text: 'Přerušovaný půst — cs.wikipedia',
-      subtitle: 'Human pageviews per day, 2024-01-01 to 2025-12-31. Wikipedia attention, not market demand.',
+      subtitle: ['Human pageviews per day, 2024-01-01 to 2025-12-31. Wikipedia attention, not market demand.'],
     });
+  });
+
+  it('caps the y-axis above spikes and marks the clipped days with their real values', () => {
+    // 100/day with seven spikes; the highest 28-day average is (27·100 + 1270)/28 ≈ 141.8 → cap ⌈425.4⌉ = 426.
+    const spikes = [30, 60, 90, 120, 150, 180, 210];
+    const series = seriesOf('2024-01-01', 240, (i) => (spikes.includes(i) ? 1300 - i : 100));
+    const analysis = analyzeSeries(series);
+    expect(analysis.dailyAxisCap).toEqual({ cap: 426, clippedDays: spikes.map((i) => ({ date: addDays('2024-01-01', i), views: 1300 - i })) });
+
+    const spec = timelineSpec(series, analysis) as Json;
+    const all = layers(spec);
+    for (const l of all.slice(0, 3)) {
+      expect(l.encoding.y.scale).toEqual({ domain: [0, 426] });
+      expect(l.mark.clip).toBe(true);
+    }
+    const [markers, labels] = all.slice(-2);
+    expect(markers!.mark.shape).toBe('triangle-up');
+    expect(values(markers!)).toHaveLength(7);
+    expect(values(labels!).map((d) => d.label)).toEqual(['1270', '1240', '1210', '1180', '1150']); // the 5 largest
+    expect(spec.title.subtitle[1]).toBe('Axis capped at 426 views/day; triangles mark 7 day(s) above it (largest values shown).');
   });
 
   it('places a weekly trend mid-week and omits missing layers', () => {
@@ -125,6 +147,13 @@ describe('chart layer rules', () => {
     }
   });
 
+  it('uses only characters the embedded font can draw', () => {
+    const spiky = seriesOf('2023-01-01', 730, (i) => (i % 97 === 0 ? 5000 : 100 + (i > 400 ? -60 : 0)));
+    const a = analyzeSeries(spiky);
+    const specs = [timelineSpec(spiky, a), timelineSpec(stepSeries(), analyzeSeries(stepSeries())), comparisonSpec(compareLanguages([{ series: spiky }])), yoySpec([a])];
+    for (const spec of specs) expect(missingGlyphs(JSON.stringify(spec))).toEqual([]);
+  });
+
   it('always carries the attention-not-demand note', () => {
     const series = stepSeries();
     const specs = [timelineSpec(series, analyzeSeries(series)), comparisonSpec(compareLanguages([{ series }])), yoySpec([analyzeSeries(seriesOf('2023-01-01', 730, () => 1))])];
@@ -150,7 +179,7 @@ describe('renderSvg', () => {
     const spec = timelineSpec(series, analyzeSeries(series));
     const svg = await renderSvg(spec);
     expect(svg.startsWith('<svg')).toBe(true);
-    for (const text of ['Přerušovaný půst — cs.wikipedia', 'Daily views', '28-day average', 'Trend (Theil–Sen)', 'Step ≈ 290 → 50/day']) {
+    for (const text of ['Přerušovaný půst — cs.wikipedia', 'Daily views', '28-day average', 'Trend (Theil–Sen)', 'Step: 290 to 50/day']) {
       expect(svg).toContain(text);
     }
     // With Helvetica metrics the SVG is about as wide as the plot; Vega's 0.8-em fallback made it ~730 px.

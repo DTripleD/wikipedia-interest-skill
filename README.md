@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–7 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts) are complete. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–8 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report) are complete. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Architecture (summary)
@@ -39,7 +39,8 @@ src/
                   cross-language comparison, evidence-based confidence (high/medium/low)
   charts/         Vega-Lite specs → SVG in Node: timeline, language comparison,
                   year over year (no statistics computed in the chart layer)
-  reports/        one-page PDF via PDFKit                       (Stage 8)
+  reports/        one-page A4 PDF (PDFKit + svg-to-pdfkit, embedded Noto Sans)
+assets/fonts/     Noto Sans TTF (SIL Open Font License, see OFL.txt)
 docs/             verified external API behavior (docs/wikimedia-api.md)
 tests/            Vitest unit tests (deterministic, no network)
 tests/integration live tests against the real Wikimedia API (opt-in)
@@ -81,6 +82,22 @@ without a browser or canvas):
 - **Year over year:** the prior vs the last 365 days for each language, with the change.
 
 Every chart states that pageviews show Wikipedia attention, not market demand.
+
+## Report
+
+`generateReport` produces a one-page A4 PDF with:
+
+- the topic, the languages and the period;
+- a banner saying that pageviews measure attention, not demand;
+- a metrics table;
+- one or two charts;
+- templated findings;
+- the confidence level with its reasons;
+- the limitations.
+
+An agent may add a short analyst note of up to 600 characters. The PDF labels it as not computed. Every
+number in the PDF comes from the deterministic code. The embedded font covers Latin, Greek and
+Cyrillic scripts.
 
 ## Requirements
 

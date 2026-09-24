@@ -9,6 +9,7 @@ import {
   type Factor,
   type FactorId,
 } from '../../src/analysis/confidence.js';
+import { missingGlyphs } from '../../src/fonts.js';
 import { makeSeries, monthlySeries, seriesOf } from '../helpers/series.js';
 
 const factor = (a: { factors: Factor[] }, id: FactorId): Factor => a.factors.find((f) => f.id === id)!;
@@ -52,7 +53,7 @@ describe('assessSeries', () => {
     const levels = Array.from({ length: 24 }, (_, k) => (k < 15 ? 280 : 60) + wiggle(k, 10));
     const a = assessSeries(analyzeSeries(monthlySeries('2024-01', levels)));
     expect(factor(a, 'level_shift').status).toBe('caution');
-    expect(factor(a, 'level_shift').message).toMatch(/between 2025-03 and 2025-04 \(≈ 290 → 50 views\/day/);
+    expect(factor(a, 'level_shift').message).toMatch(/between 2025-03 and 2025-04 \(from about 290 to 50 views\/day/);
     expect(factor(a, 'consistency').status).toBe('ok'); // deviation from the line ≈ 16 % (Python)
     expect(a.level).toBe('medium');
     expect(a.claims.trend?.level).toBe('medium');
@@ -174,6 +175,21 @@ describe('assessSeries', () => {
   });
 });
 
+describe('assessment text', () => {
+  it('uses only characters the embedded PDF font can draw', () => {
+    const article = monthlySeries('2024-01', Array.from({ length: 24 }, (_, k) => (k < 15 ? 280 : 60) + wiggle(k, 10)));
+    const editionSeries = monthlySeries('2024-01', Array.from({ length: 24 }, (_, k) => (k < 15 ? 3e6 : 2e6)), { article: null });
+    const texts = [
+      assessSeries(analyzeSeries(article, { editionSeries }), { confidence: 'medium', notes: ['Redirect to a section.'] }),
+      assess(Array.from({ length: 400 }, (_, i) => (i < 40 ? null : i % 70 === 35 ? 3000 : 3))),
+      assessSeries(analyzeSeries(seriesOf('2024-01-01', 60, (i) => 200 + i))),
+    ].map((a) => JSON.stringify(a));
+    const cmp = compareLanguages([{ series: monthlySeries('2023-01', Array(24).fill(100)) }, { series: monthlySeries('2023-01', Array(24).fill(90), { language: 'pl', project: 'pl.wikipedia' }) }]);
+    texts.push(JSON.stringify(assessComparison(cmp)));
+    for (const t of texts) expect(missingGlyphs(t)).toEqual([]);
+  });
+});
+
 describe('assessComparison', () => {
   const pl = { language: 'pl', project: 'pl.wikipedia', article: 'Post' };
   const edition = (language: string, perDay: number) =>
@@ -207,6 +223,13 @@ describe('assessComparison', () => {
     expect(stability.status).toBe('weak');
     expect(stability.message).toMatch(/not stable month by month: \w+ is ahead of \w+ in 12 of 24 complete months\./);
     expect(factor(a, 'members')).toMatchObject({ status: 'weak', message: 'Data confidence per series: sk low (see members).' });
+
+    // With many unstable pairs, the message names two and counts the rest.
+    const many = ['de', 'fr', 'it', 'es'].map((l, i) => ({
+      series: monthlySeries('2023-01', Array.from({ length: 24 }, (_, k) => 100 + wiggle(k + i, 10)), { language: l, project: `${l}.wikipedia` }),
+    }));
+    const m = factor(assessComparison(compareLanguages(many)), 'ranking_stability').message;
+    expect(m).toMatch(/^The ranking is not stable month by month: \w+ is ahead of \w+ in 12 of 24 complete months; \w+ is ahead of \w+ in 12 of 24 complete months; and 1 more adjacent pair\(s\)\. Treat/);
     expect(a.level).toBe('low');
   });
 

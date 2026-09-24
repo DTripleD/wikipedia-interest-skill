@@ -29,15 +29,15 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 5  | Analytics engine                        | ✅ done     |
 | 6  | Confidence / evidence model             | ✅ done     |
 | 7  | Charts                                  | ✅ done     |
-| 8  | Report generation (one-page PDF)        | ⏭ next      |
-| 9  | CLI / tool interface                    | pending     |
+| 8  | Report generation (one-page PDF)        | ✅ done     |
+| 9  | CLI / tool interface                    | ⏭ next      |
 | 10 | SKILL.md                                | pending     |
 | 11 | End-to-end scenarios                    | pending     |
 | 12 | Cheap-model evaluation (Haiku 4.5)      | pending     |
 | 13 | Edge cases and robustness               | pending     |
 | 14 | Final cleanup                           | pending     |
 
-**Current stage:** Stage 7 is complete and awaiting review/commit. Stage 8 comes next.
+**Current stage:** Stage 8 is complete and awaiting review/commit (it also contains the Stage 7 axis-cap follow-up). Stage 9 comes next.
 
 ## Decisions made (with the user)
 
@@ -45,7 +45,7 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
   - TypeScript 7.x (the native compiler), Vitest 5.x, `@types/node` 22.x to match the minimum supported Node.
   - Relative imports in `src/` must use the `.js` extension (NodeNext resolution).
 - **Charts:** Vega-Lite 6 (`vega-lite` + `vega` 6) rendered to SVG in Node (pure JS, no native deps, no canvas).
-- **PDF:** PDFKit + svg-to-pdfkit to embed vector charts. Installed in Stage 8.
+- **PDF:** PDFKit 0.20 + svg-to-pdfkit 0.1.8 (vector charts), fontkit 2 for text measurement, embedded Noto Sans TTF committed in `assets/fonts/` (agreed: a font file in the repo, not an npm font package).
   - Native deps such as `canvas` are avoided on purpose: the repo lives under a OneDrive path with Cyrillic characters, where native builds on Windows are fragile.
 - **User-Agent:** `wikipedia-interest-skill/<version> (<contact>)`. The contact comes from `WIKI_SKILL_CONTACT`; the fallback is a neutral placeholder (see `src/config.ts`).
 - **`.env` support (added before Stage 4):** `loadDotEnv()` in `src/config.ts` wraps Node's native `process.loadEnvFile` (no dotenv). It always reads the project-root `.env` (resolved from `import.meta.url`, independent of cwd). Shell variables win over the file, and a missing file is ignored. It is called only in the CLI `main()` (so `run()` stays pure) and in `tests/integration/setup.ts`. Unit tests never load it. `.env.example` is committed; `.env` is gitignored.
@@ -206,24 +206,42 @@ Decisions (agreed with the user): weakest-link aggregation; level-shift and seas
 - uk `Астрономія` → **medium**: a step at the same point (48 → 13.5/day), low volume (median 20/day), no seasonality detected.
 - The cs edition total also dropped ~20 % in June 2025. Treat any mid-2025 step on cs/uk articles as partly platform-wide.
 
+### Report (Stage 8) — `src/reports/`, `src/fonts.ts`, `assets/fonts/`
+
+Decisions (agreed with the user): findings are templated by code, plus an optional short analyst note from the agent (labelled "written by the AI agent, not computed"); Noto Sans TTF committed in the repo; A4.
+
+- **`content.ts`:** `buildReportModel(input)` → `{title, subtitle, attentionBanner, table, findings, analystNote, confidence, limitations, charts, warnings}`. Pure and testable.
+  - Input: `{topic, comparison, assessment, series (same order as analyses), missing?: {language, reason}[], analystNote?, generatedAt}`. Throws RangeError for an empty/over-long topic (120), a note over 600 characters, or mismatched lengths.
+  - Table columns: Edition, Article, Views, Median/day, Per million, YoY, Trend/year (compound rate if significant, else "no clear trend"), Confidence; ranked by per million (else total views), missing editions last with "—".
+  - Findings (templates): the top of the ranking with values; "ranking holds" (only when stable — instability is under Confidence); one line for each of the top 3 series (trend, YoY with "(mostly spike days)" when spike-driven, level shift with the edition-wide change); single series: typical day and busiest day, seasonality; missing editions.
+  - Confidence: comparison level and reasons ("see members" becomes "see the table"); for one series, that series' level and reasons. Limitations: the caveats (DEMAND_CAVEAT first) plus the count of zero-filled days.
+  - Charts: single series → timeline + YoY; several → comparison + YoY (YoY omitted when unavailable).
+  - Every string is checked against the font; unsupported characters become "?" with a warning.
+- **`pdf.ts`:** `generateReport(input)` → `{pdf: Buffer, model}`; `renderReportPdf(model, svgs, generatedAt)`. A4, 36 pt margins, Noto Sans Regular/Bold. Order: title, subtitle, grey banner (attention ≠ demand), table, charts (one shared scale so text sizes match), two columns (Findings + analyst note | Confidence + Limitations), footer (source, "all numbers computed deterministically"). The page count is checked (bufferPages); overflow throws.
+- **`confidence.ts` changes:** `editionShiftWithStep(analysis)` exported (used by the report); the unstable-ranking message names at most two pairs and counts the rest.
+- **Visual check (2026-09-25):** real cs/uk intermittent-fasting and uk astronomy reports, plus a maximum-content case, were generated and inspected (samples in `output/stage8-preview/`, gitignored).
+
 ### Charts (Stage 7) — `src/charts/`
 
 Decisions (agreed with the user): three charts (timeline, language comparison, year over year); builders return a Vega-Lite spec and `renderSvg`/`toChart` return `{spec, svg}`; nothing is written to disk (the CLI in Stage 9 writes `output/`).
 
 - **`charts.ts`:**
-  - `timelineSpec(series, analysis, size?)`: raw daily views (light gray), the 28-day moving average (blue) and the Theil–Sen line (orange, dashed; drawn between the mid-points of the first and last trend period). When `levelShift.detected`, it adds a dotted rule at the first period after the step, labelled "Step ≈ a → b/day". It throws a RangeError if the analysis is not of that series.
+  - `timelineSpec(series, analysis, size?)`: raw daily views (light gray), the 28-day moving average (blue) and the Theil–Sen line (orange, dashed; drawn between the mid-points of the first and last trend period). When `levelShift.detected`, it adds a dotted rule at the first period after the step, labelled "Step: a to b/day". **Axis cap (agreed with the user after a visual review):** when `analysis.dailyAxisCap` is set, the y-axis stops at the cap, lines are clipped, every clipped day gets a triangle marker at the top, the 5 largest (`MAX_CLIPPED_LABELS`) get their real value, and a second subtitle line explains it. It throws a RangeError if the analysis is not of that series.
   - `comparisonSpec(comparison, size?)`: monthly lines, one per series, in views per million when `ranking.byViewsPerMillion` exists, otherwise average views per day (the subtitle says raw views favour big editions). Colors follow input order; end-of-line labels are added because three palette slots are below 3:1 contrast. At most 8 lines (`MAX_COMPARISON_LINES`): the top 8 of the ranking, with a subtitle note.
   - `yoySpec(analyses, size?)`: one small panel per series (facet, independent y scales, because editions differ by orders of magnitude). Each panel has prior-vs-last-365-day average daily views and the relative change label. Series without YoY are listed in the subtitle. Returns null if none has YoY.
   - **Rules:** specs contain only precomputed values — no Vega-Lite `aggregate/transform/bin/timeUnit/impute/window` (a unit test enforces this). Every chart title/subtitle carries "Wikipedia attention, not market demand." All time axes use a UTC scale.
 - **`render.ts`:** `renderSvg(spec)` compiles with Vega-Lite and renders with `new vega.View(..., {renderer: 'none'}).toSVG()`. `toChart(spec)` → `{spec, svg}`.
 - **`text-metrics.ts`:** without canvas, Vega estimates text as 0.8 em per character, which made SVGs ~40 % too wide and pushed plots down (rotated axis titles). `render.ts` installs `vegaTextWidth` into Vega's `textMetrics.width` hook (the hook vl-convert uses; not in Vega's typings). It uses Helvetica AFM widths for ASCII and case-based estimates for other characters.
 - **`theme.ts`:** the dataviz reference palette, light mode (the categorical order passed the palette validator's adjacent-pair CVD/normal-vision checks), recessive gray axes/grid, font `Helvetica, Arial, sans-serif` (PDFKit has Helvetica built in).
+- **`analyzeSeries` addition:** `dailyAxisCap = {cap, clippedDays[]}` with cap = ⌈`AXIS_CAP_FACTOR` (3) × highest 28-day average⌉, or null when no day exceeds it (or the series is shorter than 28 days). It is a display aid, computed in the analysis layer so the chart computes nothing.
+- **`renderSvg`** calls `vega.resetSVGDefIds()` first: clip-path ids come from a global counter, and the reset keeps the output byte-for-byte reproducible.
 - **Shared helpers added:** `seriesLabels(analyses)` in `compare.ts` (`cs`, or `cs:Title` when an edition repeats; used by confidence and charts) and `src/format.ts` (`formatNumber`, `formatPercent`, `formatSignedPercent`, `formatPValue`; moved out of `confidence.ts`).
+- **Fonts (changed in Stage 8):** chart text is measured with the real embedded Noto Sans (`src/fonts.ts`, fontkit), not Helvetica estimates; the SVG font family is `Noto Sans, Helvetica, Arial, sans-serif`. Noto Sans has no `≈ → ▲`, so labels say "Step: a to b/day", "triangles mark …" and "from about a to b". Tests assert that chart specs and confidence texts only use characters the font can draw (`missingGlyphs`).
 - **Visual check (2026-09-25):** real cs/uk data were rendered and inspected as PNG (converted with `@resvg/resvg-js` in the scratchpad only; not a project dependency).
 
 ## Planned design (not yet implemented; revisit in each stage)
 
-- **Report (Stage 8):** embed the SVG strings with PDFKit + svg-to-pdfkit. Charts are sized for a one-page layout via the `size` option (defaults: 520×200 plot; 110×150 per YoY panel).
+- **CLI (Stage 9), report command:** build `compareLanguages` + `assessComparison(…, resolutions)` and call `generateReport({topic, comparison, assessment, series, missing, analystNote, generatedAt})`; write `pdf` to `output/` and return the path plus `model.warnings`. Map resolver results with status ≠ resolved to `missing` with short reasons (they are truncated in the table, shown in full under Findings). The analyst note is optional, ≤ 600 characters.
 - **CLI (Stage 9):** pass each language's resolver result to `assessSeries` / `assessComparison`. Output the level, reasons, claims and caveats. Factor `value`s are optional (round them). warn when `WIKI_SKILL_CONTACT` is not set. Wire `openCache()` into resolve/fetch, add `--no-cache`, and report `apiRequests` in the output. Fetch edition totals for normalization (1 extra request per language, cached). Round numbers and drop large arrays from the JSON.
 - Generated artifacts go to `output/` (gitignored).
 
@@ -252,7 +270,10 @@ src/charts/charts.ts           Vega-Lite spec builders: timeline, language compa
 src/charts/render.ts           spec → SVG (headless Vega), installs the text-width hook
 src/charts/text-metrics.ts     Helvetica text-width estimate for Vega layout without canvas
 src/charts/theme.ts            palette, ink colors, font, shared Vega-Lite config
-src/reports/                   empty (.gitkeep) — Stage 8
+src/fonts.ts                   embedded Noto Sans: file paths, text width (fontkit), missing-glyph check
+src/reports/content.ts         report model: table rows, templated findings, confidence, limitations, chart specs
+src/reports/pdf.ts             one-page A4 layout with PDFKit + svg-to-pdfkit; generateReport
+assets/fonts/                  NotoSans-Regular.ttf, NotoSans-Bold.ttf (unhinted, v2.015) + OFL.txt
 docs/wikimedia-api.md          verified Wikimedia API behavior + sources
 tests/*.test.ts                config, CLI, date helper tests
 tests/wikipedia/*.test.ts      http, languages, api, resolver unit tests (scripted fetch, no network)
@@ -260,7 +281,9 @@ tests/data/*.test.ts           series, cache, getDailySeries unit tests (fake AP
 tests/helpers/memory-cache.ts  in-memory JsonCache for tests
 tests/helpers/series.ts        makeSeries / seriesOf fixtures
 tests/analysis/*.test.ts       stats, trends, outliers, patterns, confidence, analyze/compare (reference values from Python)
-tests/charts/*.test.ts         chart specs (data, encodings, no VL computations), rendering, text metrics
+tests/charts/*.test.ts         chart specs (data, encodings, no VL computations, font coverage), rendering
+tests/fonts.test.ts            text widths match PDFKit's, missing-glyph detection, Vega text-width hook
+tests/reports/*.test.ts        report model (ranking, findings, caps, validation, sanitizing), one-page PDF
 tests/integration/*.live.test.ts  live API tests (npm run test:integration)
 tests/integration/setup.ts     loads .env for live tests
 .env.example                   template for .env (WIKI_SKILL_CONTACT)
@@ -274,16 +297,19 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 ## Known limitations
 
 - The CLI has only `version`. The client and resolver are not yet exposed through the CLI (Stage 9).
-- The cache, analytics, confidence model and charts are not yet used by any command, because the CLI (Stage 9) does not exist yet.
+- The cache, analytics, confidence model, charts and report are not yet used by any command, because the CLI (Stage 9) does not exist yet.
 - The Mann–Kendall test assumes independent observations. Monthly averages are still autocorrelated, so p-values are somewhat optimistic. Weekly-basis trends (short periods) are the most affected.
 - The trend is monotonic/linear only. Level shifts and seasonality are *flagged* (Stage 6), not modelled: the trend is still one Theil–Sen line.
 - Confidence thresholds are explicit, documented heuristics (`CONFIDENCE_THRESHOLDS`), not calibrated probabilities. They were checked on the assignment's cs/uk data only.
 - The level-shift detector finds at most one change point, needs a trend estimate (≥ 8 complete months or weeks), and ignores steps with fewer than 3 periods on one side. Pettitt is conservative on short series (e.g. n = 10: even a perfect 5/5 split gives p ≈ 0.066). The edition-shift note uses Pettitt significance and location only (not the step-vs-line check), because edition totals often combine a slow decline with a step.
 - Seasonality needs 22 complete months. With 2-year windows there are only 11 pairs, so weak seasonality goes undetected, and a level shift can distort the lag-12 correlation. Recent-vs-previous is therefore capped at medium whenever seasonality is unknown.
 - Ranking stability counts months only. It does not test whether a per-month difference is significant.
-- Charts: a single large spike (e.g. cs 2025-04-14, 508 views vs ≈ 14) sets the y-axis of the timeline, which flattens the moving average. The y-axis is kept linear and unclipped on purpose (honest); clipping would need a threshold computed in the analysis layer.
+- Charts: the timeline's axis cap (3 × the highest 28-day average) is a fixed heuristic. Only the 5 largest clipped days get value labels, and labels of spikes a few days apart can overlap.
 - Charts are static (for the PDF): no hover/tooltip, light mode only. Text widths are estimates, so a label can be a few pixels off in the final renderer; months with only a few days (first/last) are plotted like full months, since their values are daily averages or per-million ratios.
 - The comparison chart shows at most 8 series; more would exceed the validated categorical palette.
+- Report: the embedded Noto Sans covers Latin, Greek and Cyrillic only. CJK, Arabic, Hebrew and Indic titles are replaced with "?" in the report text (with a warning); inside charts they would render as empty boxes (a warning is added too).
+- Report layout: text blocks are capped (10 table rows, 3 per-series findings, 4 confidence reasons, 4 limitations, 600-character note), and the charts shrink to the remaining height down to 45 %; below that the second chart (YoY) is dropped with a warning. Long cells are truncated with an ellipsis.
+- svg-to-pdfkit quirks (observed): it sizes a drawing from the SVG's own width/height attributes and treats them as px unless `assumePt: true`; `pdf.ts` rewrites the attributes and sets `assumePt`. Ligatures are disabled in PDF text so extracted text reads correctly ("Confidence", not "Confdence").
 - YoY compares the last 365 days with the 365 before. Leap days shift the alignment by one day.
 - In outlier detection, a sustained level shift produces a few flagged days until the rolling window catches up. Low-traffic series (a few views/day) can produce outliers from noise alone.
 - Normalization by edition totals controls for edition size, but not for audience composition or for how well the topic is covered in each edition.

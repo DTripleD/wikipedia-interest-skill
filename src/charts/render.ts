@@ -15,6 +15,8 @@ export interface Chart {
 (vega as unknown as { textMetrics: { width: typeof vegaTextWidth } }).textMetrics.width = vegaTextWidth;
 
 export async function renderSvg(spec: TopLevelSpec): Promise<string> {
+  // Clip-path and gradient ids come from global counters; reset them so output is reproducible.
+  vega.resetSVGDefIds();
   const view = new vega.View(vega.parse(compile(spec).spec), { renderer: 'none' });
   try {
     return await view.toSVG();

@@ -19,6 +19,9 @@ export interface ChartSize {
   height?: number;
 }
 
+/** Clipped spikes that get a value label (the largest ones); all of them get a marker. */
+export const MAX_CLIPPED_LABELS = 5;
+
 /** Most lines one comparison chart shows (one per categorical palette slot). */
 export const MAX_COMPARISON_LINES = CATEGORICAL.length;
 
@@ -32,7 +35,9 @@ const TIME_AXIS = { field: 'date', type: 'temporal', title: null, scale: { type:
 
 /**
  * Daily views (light), the 28-day moving average, the Theil–Sen trend line and, if one was
- * detected, the level shift. `analysis` must be the analysis of `series`.
+ * detected, the level shift. When analysis.dailyAxisCap is set, the y-axis stops at the cap
+ * and each clipped day gets a triangle marker (the largest also get their real value), so single
+ * spikes do not flatten the averages. `analysis` must be the analysis of `series`.
  */
 export function timelineSpec(series: PageviewSeries, analysis: SeriesAnalysis, size: ChartSize = {}): TopLevelSpec {
   if (series.project !== analysis.project || series.article !== analysis.article || series.start !== analysis.period.start || series.end !== analysis.period.end) {
@@ -43,17 +48,25 @@ export function timelineSpec(series: PageviewSeries, analysis: SeriesAnalysis, s
   if (trend.available) keys.push('Trend (Theil–Sen)');
   const colors = [DEEMPHASIS, CATEGORICAL[0], CATEGORICAL[1]];
   const color = (key: string) => ({ datum: key, scale: { domain: keys, range: colors.slice(0, keys.length) } });
+  const axisCap = analysis.dailyAxisCap;
+  const y = (title?: string) => ({
+    field: 'value',
+    type: 'quantitative',
+    ...(title ? { title } : {}),
+    ...(axisCap ? { scale: { domain: [0, axisCap.cap] } } : {}),
+  });
+  const line = (extra: Record<string, unknown> = {}) => ({ type: 'line', clip: true, ...extra });
 
   const layers: unknown[] = [
     {
       data: { values: series.points.map((p) => ({ date: p.date, value: p.views })) },
-      mark: { type: 'line', strokeWidth: 1 },
-      encoding: { x: TIME_AXIS, y: { field: 'value', type: 'quantitative', title: 'Views per day' }, color: color('Daily views') },
+      mark: line({ strokeWidth: 1 }),
+      encoding: { x: TIME_AXIS, y: y('Views per day'), color: color('Daily views') },
     },
     {
       data: { values: analysis.movingAverages[28].filter((p) => p.value !== null).map((p) => ({ date: p.date, value: p.value })) },
-      mark: { type: 'line' },
-      encoding: { x: TIME_AXIS, y: { field: 'value', type: 'quantitative' }, color: color('28-day average') },
+      mark: line(),
+      encoding: { x: TIME_AXIS, y: y(), color: color('28-day average') },
     },
   ];
   if (trend.available) {
@@ -66,14 +79,14 @@ export function timelineSpec(series: PageviewSeries, analysis: SeriesAnalysis, s
           { date: mid(trend.lastPeriod), value: trend.fittedEnd },
         ],
       },
-      mark: { type: 'line', strokeDash: [6, 4] },
-      encoding: { x: TIME_AXIS, y: { field: 'value', type: 'quantitative' }, color: color('Trend (Theil–Sen)') },
+      mark: line({ strokeDash: [6, 4] }),
+      encoding: { x: TIME_AXIS, y: y(), color: color('Trend (Theil–Sen)') },
     });
   }
   const shift = analysis.levelShift;
   if (shift.assessed && shift.detected) {
     const date = shift.basis === 'monthly' ? `${shift.firstPeriodAfter}-01` : shift.firstPeriodAfter;
-    const data = { values: [{ date, label: `Step ≈ ${formatNumber(shift.medianBefore)} → ${formatNumber(shift.medianAfter)}/day` }] };
+    const data = { values: [{ date, label: `Step: ${formatNumber(shift.medianBefore)} to ${formatNumber(shift.medianAfter)}/day` }] };
     layers.push(
       { data, mark: { type: 'rule', color: INK.secondary, strokeWidth: 1, strokeDash: [2, 2] }, encoding: { x: TIME_AXIS } },
       {
@@ -84,10 +97,28 @@ export function timelineSpec(series: PageviewSeries, analysis: SeriesAnalysis, s
     );
   }
 
+  const subtitle = [`Human pageviews per day, ${analysis.period.start} to ${analysis.period.end}. ${ATTENTION_NOTE}`];
+  if (axisCap) {
+    const markers = axisCap.clippedDays.map((d) => ({ date: d.date, value: axisCap.cap }));
+    const labelled = [...axisCap.clippedDays]
+      .sort((a, b) => b.views - a.views || a.date.localeCompare(b.date))
+      .slice(0, MAX_CLIPPED_LABELS)
+      .map((d) => ({ date: d.date, value: axisCap.cap, label: String(d.views) }));
+    layers.push(
+      { data: { values: markers }, mark: { type: 'point', shape: 'triangle-up', filled: true, size: 40, color: INK.secondary, opacity: 1 }, encoding: { x: TIME_AXIS, y: y() } },
+      {
+        data: { values: labelled },
+        mark: { type: 'text', baseline: 'bottom', dy: -5, color: INK.secondary, fontSize: 9 },
+        encoding: { x: TIME_AXIS, y: y(), text: { field: 'label' } },
+      },
+    );
+    subtitle.push(`Axis capped at ${axisCap.cap} views/day; triangles mark ${axisCap.clippedDays.length} day(s) above it (largest values shown).`);
+  }
+
   const title = analysis.article === null ? `${analysis.project} (all articles)` : `${analysis.article.replaceAll('_', ' ')} — ${analysis.project}`;
   return {
     $schema: SCHEMA,
-    title: { text: title, subtitle: `Human pageviews per day, ${analysis.period.start} to ${analysis.period.end}. ${ATTENTION_NOTE}` },
+    title: { text: title, subtitle },
     width: size.width ?? 520,
     height: size.height ?? 200,
     config: CHART_CONFIG,

@@ -257,17 +257,27 @@ function levelShiftFactor(a: SeriesAnalysis): Factor {
 function levelShiftText(a: SeriesAnalysis): string {
   const s = a.levelShift;
   if (!s.assessed) return '';
-  return `Interest changed abruptly between ${s.lastPeriodBefore} and ${s.firstPeriodAfter} (≈ ${fmt(s.medianBefore)} → ${fmt(s.medianAfter)} views/day, Pettitt ${pValue(s.pValue)}); this looks like a one-time step, not a gradual trend.${editionShiftText(a)} Check for a cause (article rename or merge, search-engine or Wikipedia changes, news) before reading it as a change in interest.`;
+  return `Interest changed abruptly between ${s.lastPeriodBefore} and ${s.firstPeriodAfter} (from about ${fmt(s.medianBefore)} to ${fmt(s.medianAfter)} views/day, Pettitt ${pValue(s.pValue)}); this looks like a one-time step, not a gradual trend.${editionShiftText(a)} Check for a cause (article rename or merge, search-engine or Wikipedia changes, news) before reading it as a change in interest.`;
+}
+
+/**
+ * Relative change of the edition totals when the whole edition shifted (Pettitt p < 0.05)
+ * within one period of the article's detected step; null otherwise.
+ */
+export function editionShiftWithStep(a: SeriesAnalysis): number | null {
+  const s = a.levelShift;
+  const e = a.editionLevelShift;
+  if (!s.assessed || !s.detected || !e?.assessed || e.pValue >= SIGNIFICANCE_LEVEL || e.medianBefore === 0 || !a.trend.available) return null;
+  const labels = a.trend.periodLabels;
+  if (Math.abs(labels.indexOf(e.firstPeriodAfter) - labels.indexOf(s.firstPeriodAfter)) > 1) return null;
+  return e.medianAfter / e.medianBefore - 1;
 }
 
 /** A note when the whole edition shifted within one period of the article's step. */
 function editionShiftText(a: SeriesAnalysis): string {
-  const s = a.levelShift;
-  const e = a.editionLevelShift;
-  if (!s.assessed || !e?.assessed || e.pValue >= SIGNIFICANCE_LEVEL || e.medianBefore === 0 || !a.trend.available) return '';
-  const labels = a.trend.periodLabels;
-  if (Math.abs(labels.indexOf(e.firstPeriodAfter) - labels.indexOf(s.firstPeriodAfter)) > 1) return '';
-  return ` The whole ${a.language} edition also shifted then (${signedPct(e.medianAfter / e.medianBefore - 1)} total views), so part of this change is edition-wide rather than topic-specific; compare views per million.`;
+  const change = editionShiftWithStep(a);
+  if (change === null) return '';
+  return ` The whole ${a.language} edition also shifted then (${signedPct(change)} total views), so part of this change is edition-wide rather than topic-specific; compare views per million.`;
 }
 
 function seasonalityFactor(a: SeriesAnalysis): Factor {
@@ -410,7 +420,9 @@ export function assessComparison(
       message:
         unstable.length === 0
           ? `The ranking holds month by month: ${rankingPairs.map(describe).join('; ')}.`
-          : `The ranking is not stable month by month: ${unstable.map(describe).join('; ')}. Treat these positions as roughly equal.`,
+          : `The ranking is not stable month by month: ${unstable.slice(0, 2).map(describe).join('; ')}${
+              unstable.length > 2 ? `; and ${unstable.length - 2} more adjacent pair(s)` : ''
+            }. Treat these positions as roughly equal.`,
     });
   }
 

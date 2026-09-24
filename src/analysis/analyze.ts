@@ -24,6 +24,8 @@ import {
 export const DEFAULT_RECENT_DAYS = 90;
 export const DEFAULT_YOY_DAYS = 365;
 export const MOVING_AVERAGE_WINDOWS = [7, 28] as const;
+/** The daily chart's y-axis is capped at this multiple of the highest 28-day average. */
+export const AXIS_CAP_FACTOR = 3;
 
 export interface AnalysisOptions {
   /** Edition-wide daily totals for the same language; must cover the series period. */
@@ -103,6 +105,13 @@ export interface SeriesAnalysis {
   seasonality: Seasonality | PatternUnavailable;
   volatility: Volatility;
   outliers: OutlierResult;
+  /**
+   * Display aid for daily charts: when single days exceed AXIS_CAP_FACTOR × the highest
+   * 28-day average, the y-axis is capped there so the averages stay readable, and the days
+   * above it are listed so the chart can mark them with their real values. Null when no day
+   * exceeds the cap (or the series is shorter than 28 days).
+   */
+  dailyAxisCap: { cap: number; clippedDays: Array<{ date: string; views: number }> } | null;
   warnings: string[];
 }
 
@@ -132,6 +141,7 @@ export function analyzeSeries(series: PageviewSeries, options: AnalysisOptions =
   const completeMonthAverages = monthly.filter((m) => m.complete).map((m) => m.dailyAverage);
   const trend = analyzeTrend(series);
   const outliers = detectOutliers(series);
+  const movingAverages = { 7: movingAverage(series.points, 7), 28: movingAverage(series.points, 28) };
 
   return {
     language: series.language,
@@ -147,7 +157,7 @@ export function analyzeSeries(series: PageviewSeries, options: AnalysisOptions =
     },
     normalization: edition && editionTotal > 0 ? { editionTotalViews: editionTotal, viewsPerMillion: (totalViews / editionTotal) * 1e6 } : null,
     monthly,
-    movingAverages: { 7: movingAverage(series.points, 7), 28: movingAverage(series.points, 28) },
+    movingAverages,
     recentVsPrevious: withoutSpikes(comparePeriods(series, options.recentDays ?? DEFAULT_RECENT_DAYS), outliers.outliers),
     yearOverYear: withoutSpikes(comparePeriods(series, options.yoyDays ?? DEFAULT_YOY_DAYS), outliers.outliers),
     trend,
@@ -160,8 +170,17 @@ export function analyzeSeries(series: PageviewSeries, options: AnalysisOptions =
       trendDeviation: trendDeviation(trend),
     },
     outliers,
+    dailyAxisCap: dailyAxisCap(series, movingAverages[28]),
     warnings,
   };
+}
+
+function dailyAxisCap(series: PageviewSeries, ma28: readonly MovingAveragePoint[]): SeriesAnalysis['dailyAxisCap'] {
+  const highestAverage = Math.max(0, ...ma28.map((p) => p.value ?? 0));
+  if (highestAverage === 0) return null;
+  const cap = Math.ceil(AXIS_CAP_FACTOR * highestAverage);
+  const clippedDays = series.points.filter((p) => p.views > cap).map((p) => ({ date: p.date, views: p.views }));
+  return clippedDays.length === 0 ? null : { cap, clippedDays };
 }
 
 function trendDeviation(trend: TrendResult | TrendUnavailable): number | null {

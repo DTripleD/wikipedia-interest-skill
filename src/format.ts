@@ -20,3 +20,8 @@ export function formatSignedPercent(change: number): string {
 export function formatPValue(p: number): string {
   return p < 0.001 ? 'p < 0.001' : `p = ${p < 0.01 ? p.toFixed(3) : p.toFixed(2)}`;
 }
+
+/** 12345.6 → "12,346". */
+export function formatInteger(x: number): string {
+  return Math.round(x).toLocaleString('en-US');
+}

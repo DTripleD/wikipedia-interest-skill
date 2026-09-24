@@ -5,9 +5,10 @@
  * so line charts carry direct end-labels as well as a legend.
  *
  * Charts are static SVG destined for a printed/PDF report: light mode only, no hover layer.
- * The font is Helvetica because PDFKit (Stage 8) has it built in.
+ * The font is the embedded Noto Sans (src/fonts.ts), which the PDF also uses.
  */
 import type { Config } from 'vega-lite';
+import { FONT_FAMILY } from '../fonts.js';
 
 export const CATEGORICAL = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'] as const;
 
@@ -22,7 +23,7 @@ export const INK = {
 /** De-emphasized data (raw daily views, the earlier period). */
 export const DEEMPHASIS = '#c3c2b7';
 
-export const FONT = 'Helvetica, Arial, sans-serif';
+export const FONT = FONT_FAMILY;
 
 export const CHART_CONFIG: Config = {
   background: 'white',
