@@ -7,7 +7,8 @@
  * makes editions of different sizes comparable.
  */
 import { aggregateMonthly, sliceSeries, type Coverage, type PageviewSeries } from '../data/series.js';
-import { detectOutliers, type OutlierResult } from './outliers.js';
+import { detectOutliers, type Outlier, type OutlierResult } from './outliers.js';
+import { detectLevelShift, detectSeasonality, type LevelShift, type PatternUnavailable, type Seasonality } from './patterns.js';
 import { coefficientOfVariation, mean, median, sum } from './stats.js';
 import {
   analyzeTrend,
@@ -56,7 +57,21 @@ export interface Volatility {
   dailyCv: number | null;
   /** CV of the average daily views of complete months; null for fewer than 3 complete months. */
   monthlyCv: number | null;
+  /**
+   * Median absolute deviation of the trend periods from the Theil–Sen line / their median
+   * level: how far a typical period strays from the trend (0.2 = 20 %). Robust to a single
+   * spike period. Null without a trend or with a zero median.
+   */
+  trendDeviation: number | null;
 }
+
+/** A period comparison plus the same change with the excess views of spike days removed. */
+export type AnalyzedComparison =
+  | (PeriodComparison & {
+      /** Relative change after subtracting (views − baseline) of spike days in each window; null if the previous adjusted mean is 0. */
+      relativeChangeExcludingSpikes: number | null;
+    })
+  | PeriodComparisonUnavailable;
 
 export interface SeriesAnalysis {
   language: string;
@@ -74,9 +89,18 @@ export interface SeriesAnalysis {
   monthly: MonthlyRow[];
   /** Keyed by window length in days (7 and 28). */
   movingAverages: Record<(typeof MOVING_AVERAGE_WINDOWS)[number], MovingAveragePoint[]>;
-  recentVsPrevious: PeriodComparison | PeriodComparisonUnavailable;
-  yearOverYear: PeriodComparison | PeriodComparisonUnavailable;
+  recentVsPrevious: AnalyzedComparison;
+  yearOverYear: AnalyzedComparison;
   trend: TrendResult | TrendUnavailable;
+  /** Whether the change is a one-time step rather than a gradual trend. */
+  levelShift: LevelShift | PatternUnavailable;
+  /**
+   * The same detector on the edition-wide totals over the same period (null without edition
+   * data). A step in both at the same time points to an edition-wide cause, not the topic.
+   */
+  editionLevelShift: LevelShift | PatternUnavailable | null;
+  /** Whether the monthly pattern repeats a year later. */
+  seasonality: Seasonality | PatternUnavailable;
   volatility: Volatility;
   outliers: OutlierResult;
   warnings: string[];
@@ -106,6 +130,8 @@ export function analyzeSeries(series: PageviewSeries, options: AnalysisOptions =
   const totalViews = sum(views);
   const editionTotal = edition ? sum(edition.points.map((p) => p.views)) : 0;
   const completeMonthAverages = monthly.filter((m) => m.complete).map((m) => m.dailyAverage);
+  const trend = analyzeTrend(series);
+  const outliers = detectOutliers(series);
 
   return {
     language: series.language,
@@ -122,15 +148,41 @@ export function analyzeSeries(series: PageviewSeries, options: AnalysisOptions =
     normalization: edition && editionTotal > 0 ? { editionTotalViews: editionTotal, viewsPerMillion: (totalViews / editionTotal) * 1e6 } : null,
     monthly,
     movingAverages: { 7: movingAverage(series.points, 7), 28: movingAverage(series.points, 28) },
-    recentVsPrevious: comparePeriods(series, options.recentDays ?? DEFAULT_RECENT_DAYS),
-    yearOverYear: comparePeriods(series, options.yoyDays ?? DEFAULT_YOY_DAYS),
-    trend: analyzeTrend(series),
+    recentVsPrevious: withoutSpikes(comparePeriods(series, options.recentDays ?? DEFAULT_RECENT_DAYS), outliers.outliers),
+    yearOverYear: withoutSpikes(comparePeriods(series, options.yoyDays ?? DEFAULT_YOY_DAYS), outliers.outliers),
+    trend,
+    levelShift: detectLevelShift(trend),
+    editionLevelShift: edition ? detectLevelShift(analyzeTrend(edition)) : null,
+    seasonality: detectSeasonality(monthly),
     volatility: {
       dailyCv: coefficientOfVariation(views),
       monthlyCv: completeMonthAverages.length >= 3 ? coefficientOfVariation(completeMonthAverages) : null,
+      trendDeviation: trendDeviation(trend),
     },
-    outliers: detectOutliers(series),
+    outliers,
     warnings,
+  };
+}
+
+function trendDeviation(trend: TrendResult | TrendUnavailable): number | null {
+  if (!trend.available) return null;
+  const level = median(trend.values);
+  if (level === 0) return null;
+  return median(trend.values.map((v, i) => Math.abs(v - (trend.fittedStart + trend.slopePerPeriod * i)))) / level;
+}
+
+function withoutSpikes(comparison: PeriodComparison | PeriodComparisonUnavailable, outliers: readonly Outlier[]): AnalyzedComparison {
+  if (!comparison.available) return comparison;
+  const adjustedMean = (p: PeriodComparison['recent']): number => {
+    const excess = sum(
+      outliers.filter((o) => o.direction === 'spike' && o.date >= p.start && o.date <= p.end).map((o) => o.views - o.baseline),
+    );
+    return (p.totalViews - excess) / p.days;
+  };
+  const previous = adjustedMean(comparison.previous);
+  return {
+    ...comparison,
+    relativeChangeExcludingSpikes: previous === 0 ? null : adjustedMean(comparison.recent) / previous - 1,
   };
 }
 

@@ -59,3 +59,41 @@ export function normalCdf(z: number): number {
   const erf = 1 - poly * Math.exp(-x * x);
   return z >= 0 ? 0.5 * (1 + erf) : 0.5 * (1 - erf);
 }
+
+/** 1-based ranks; tied values get the average of their ranks. */
+export function ranks(xs: readonly number[]): number[] {
+  const order = xs.map((x, i) => ({ x, i })).sort((a, b) => a.x - b.x);
+  const result = new Array<number>(xs.length);
+  for (let start = 0; start < order.length; ) {
+    let end = start;
+    while (end + 1 < order.length && order[end + 1]!.x === order[start]!.x) end++;
+    const rank = (start + end) / 2 + 1;
+    for (let k = start; k <= end; k++) result[order[k]!.i] = rank;
+    start = end + 1;
+  }
+  return result;
+}
+
+/** Pearson correlation; null for fewer than 2 pairs or a constant side. */
+export function pearson(xs: readonly number[], ys: readonly number[]): number | null {
+  if (xs.length !== ys.length) throw new RangeError('pearson needs two lists of the same length.');
+  if (xs.length < 2) return null;
+  const mx = mean(xs);
+  const my = mean(ys);
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (let i = 0; i < xs.length; i++) {
+    const dx = xs[i]! - mx;
+    const dy = ys[i]! - my;
+    sxy += dx * dy;
+    sxx += dx * dx;
+    syy += dy * dy;
+  }
+  return sxx === 0 || syy === 0 ? null : sxy / Math.sqrt(sxx * syy);
+}
+
+/** Spearman rank correlation (Pearson on average ranks); null as for `pearson`. */
+export function spearman(xs: readonly number[], ys: readonly number[]): number | null {
+  return pearson(ranks(xs), ranks(ys));
+}

@@ -27,8 +27,8 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 3  | Wikipedia article resolver              | ✅ done     |
 | 4  | Data model, normalization, caching      | ✅ done     |
 | 5  | Analytics engine                        | ✅ done     |
-| 6  | Confidence / evidence model             | ⏭ next      |
-| 7  | Charts                                  | pending     |
+| 6  | Confidence / evidence model             | ✅ done     |
+| 7  | Charts                                  | ⏭ next      |
 | 8  | Report generation (one-page PDF)        | pending     |
 | 9  | CLI / tool interface                    | pending     |
 | 10 | SKILL.md                                | pending     |
@@ -37,7 +37,7 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 13 | Edge cases and robustness               | pending     |
 | 14 | Final cleanup                           | pending     |
 
-**Current stage:** Stage 5 is complete and awaiting review/commit. Stage 6 comes next.
+**Current stage:** Stage 6 is complete and awaiting review/commit. Stage 7 comes next.
 
 ## Decisions made (with the user)
 
@@ -157,20 +157,59 @@ Decisions (agreed with the user): Theil–Sen + Mann–Kendall for the trend; Ha
 - **`compare.ts`:** `compareLanguages([{series, editionSeries?}], options)` cuts all series to their **common period** (with a warning for each one that was cut), runs `analyzeSeries` on each, and ranks `byTotalViews` and `byViewsPerMillion`. The latter is null unless every input has edition data. Each row has `relativeToLeader`. It works for different articles in the same language too.
 - Results keep full-precision numbers and full arrays (moving averages, outlier lists). The CLI (Stage 9) must round and trim them for the agent.
 
+**Additions made in Stage 6 (inputs for the confidence model):**
+- `TrendResult.periodLabels` (one label per trend value).
+- `SeriesAnalysis.levelShift` / `seasonality` (from `patterns.ts`) and `editionLevelShift` (the same step detector on the edition totals; null without edition data).
+- `volatility.trendDeviation`: median |period − Theil–Sen line| / median level. It is robust, so a single spike month does not count twice (outliers already cover it). It replaced a first SD-based draft.
+- `recentVsPrevious` / `yearOverYear` carry `relativeChangeExcludingSpikes` (the excess views of spike days in each window are subtracted). The type is `AnalyzedComparison`.
+- `RankRow.index` = position in `analyses`.
+- `stats.ts`: `ranks`, `pearson`, `spearman`. `trends.ts`: `pettitt`.
+
 **Live check (2026-09-24), intermittent fasting, 2024-09-23..2026-09-22:**
 - cs `Přerušovaný půst`: 6 716 views, 4.41 per million, YoY −54 %, decreasing (p < 0.001), 20 outliers carrying 18 % of views. The biggest outlier is 2025-04-14 (508 views vs a baseline of 14).
 - uk `Інтервальне голодування`: 10 522 views, 6.72 per million, YoY −75 %, decreasing.
-- uk shows a **level drop** in April 2025 (≈ 28 → 6 views/day). Stage 6 should treat step changes as a reason for caution when interpreting a trend.
+- uk shows a **level drop** (≈ 28 → 6 views/day). Stage 6 located it between 2025-05 and 2025-06 on complete months.
+
+### Confidence / evidence model (Stage 6) — `src/analysis/patterns.ts`, `src/analysis/confidence.ts`
+
+Decisions (agreed with the user): weakest-link aggregation; level-shift and seasonality detectors; volume thresholds weak < 5 and caution < 30 median views/day; assess both single series and comparisons.
+
+- **`patterns.ts`:**
+  - `detectLevelShift(trend)`: Pettitt's test on the trend values (monthly or weekly). A step is `detected` only if p < 0.05, both segments have ≥ 3 periods, **and** the two-level model (segment medians) has a mean absolute error ≤ that of the Theil–Sen line. The last condition is needed because a steady trend also gives a significant Pettitt change point. It also returns `stepDeviation` (median of |v − segment median| / segment median).
+  - `detectSeasonality(monthly)`: ln(1 + daily average) of complete months, detrended by Theil–Sen. Months 12 apart are correlated with Spearman. It needs ≥ 10 pairs (22 complete months); `detected` if r ≥ 0.6 (≈ one-sided p < 0.025 at 11 pairs).
+- **`confidence.ts`:**
+  - `assessSeries(analysis, resolution?)` → `{level, reasons, factors[], claims:{trend, yearOverYear, recentVsPrevious}, caveats}`.
+  - `assessComparison(comparison, resolutions?)`: `resolutions` are in the same order as the inputs. It returns `{level, reasons, factors, basis, rankingPairs, members, caveats}`.
+  - **Factors** (`ok | caution | weak | info`, with `value` and a message). All thresholds are in the exported `CONFIDENCE_THRESHOLDS`:
+    - `resolution`: high → ok, medium → caution (with the resolver notes), null → weak;
+    - `period`: < 90 d weak, < 365 d caution;
+    - `volume`: median daily views < 5 weak, < 30 caution;
+    - `coverage`: imputed share > 5 % caution, > 20 % weak; first reported day > 30 d after the start → at least caution; no data → weak;
+    - `outliers`: `excessViewsShare` > 10 % caution, > 25 % weak;
+    - `consistency`: `trendDeviation` (or `stepDeviation` when a step is detected, because a line through a step fits badly by construction) > 20 % caution, > 40 % weak;
+    - `level_shift`: detected → caution. If the edition totals shifted within ±1 period, the message says the change is partly edition-wide;
+    - `seasonality`: always `info`.
+  - **Level** = weakest link: any weak → low, any caution → medium, else high. `reasons` = the weak messages, then the caution ones.
+  - **Claims:** never above the data level.
+    - Trend: high only if Mann–Kendall p < 0.01 on ≥ 12 monthly periods with no step. No significant trend → medium ("not proof of stability"). Weekly basis, fewer than 12 months or a step → at most medium.
+    - Changes: spike-driven (removing spikes flips the sign or halves the change, with a gap ≥ 10 pp) → medium. Recent vs previous → medium unless seasonality was checked and not found.
+  - **Comparison factors:**
+    - `normalization`: raw totals → caution;
+    - `ranking_stability`: for each adjacent pair in the ranking (per million when available), the share of complete months in which the higher one is ahead (ties ½): ≥ 90 % ok, ≥ 70 % caution, else weak. It needs ≥ 3 complete months, otherwise `info`;
+    - `members`: the worst member level.
+  - **Caveats:** `DEMAND_CAVEAT` (pageviews ≠ market demand / willingness to pay) is always first. `SERIES_CAVEATS` add scope (one article, agent=user). `COMPARISON_CAVEATS` add edition coverage and audience effects.
+
+**Live check (2026-09-25), 2024-09-23..2026-09-22** (pinned in `tests/integration/confidence.live.test.ts`):
+- cs `Přerušovaný půst` → **medium** (volume: median 6/day; spikes carry 18 % of views). Trend: decreasing, medium (limited by the data).
+- uk `Інтервальне голодування` → **medium**. There is a step between 2025-05 and 2025-06 (27.8 → 6.2/day), and the **whole uk edition fell 33 % at the same time**.
+- cs vs uk (per million) → **low**: uk is ahead in only 15 of 23 months.
+- uk `Астрономія` → **medium**: a step at the same point (48 → 13.5/day), low volume (median 20/day), no seasonality detected.
+- The cs edition total also dropped ~20 % in June 2025. Treat any mid-2025 step on cs/uk articles as partly platform-wide.
 
 ## Planned design (not yet implemented; revisit in each stage)
 
-- **Confidence (Stage 6):** a high/medium/low level from explicit rules, each with human-readable reasons. No fabricated percentages. Inputs available from Stage 5:
-  - `coverage.imputedShare` and `firstReportedDate`; period length;
-  - `trend.available`, `direction` and `mannKendall.pValue`; `volatility.dailyCv` / `monthlyCv`;
-  - `outliers.share` and `excessViewsShare`; whether YoY/recent comparisons are available; the absolute level (a low daily mean makes the data noisy);
-  - the resolver's `confidence` and notes (e.g. section redirects).
-  - Consider detecting level shifts (see the uk finding above) and seasonality.
-- **CLI (Stage 9):** warn when `WIKI_SKILL_CONTACT` is not set. Wire `openCache()` into resolve/fetch, add `--no-cache`, and report `apiRequests` in the output. Fetch edition totals for normalization (1 extra request per language, cached). Round numbers and drop large arrays from the JSON.
+- **Charts (Stage 7):** consume `SeriesAnalysis` (monthly rows, moving averages, `trend.fittedStart/End`, `levelShift` periods for an annotation) without computing statistics.
+- **CLI (Stage 9):** pass each language's resolver result to `assessSeries` / `assessComparison`. Output the level, reasons, claims and caveats. Factor `value`s are optional (round them). warn when `WIKI_SKILL_CONTACT` is not set. Wire `openCache()` into resolve/fetch, add `--no-cache`, and report `apiRequests` in the output. Fetch edition totals for normalization (1 extra request per language, cached). Round numbers and drop large arrays from the JSON.
 - Generated artifacts go to `output/` (gitignored).
 
 ## Current layout
@@ -191,6 +230,8 @@ src/analysis/trends.ts         Theil–Sen, Mann–Kendall, trend, period compar
 src/analysis/outliers.ts       Hampel outlier detection
 src/analysis/analyze.ts        analyzeSeries: full per-series analysis (+ edition normalization)
 src/analysis/compare.ts        compareLanguages: common period, rankings
+src/analysis/patterns.ts       level-shift (Pettitt + step-vs-line) and seasonality (lag-12 Spearman) detectors
+src/analysis/confidence.ts     evidence-based confidence: factors, weakest-link level, per-claim levels, caveats
 src/{charts,reports}/          empty (.gitkeep) — filled in later stages
 docs/wikimedia-api.md          verified Wikimedia API behavior + sources
 tests/*.test.ts                config, CLI, date helper tests
@@ -198,7 +239,7 @@ tests/wikipedia/*.test.ts      http, languages, api, resolver unit tests (script
 tests/data/*.test.ts           series, cache, getDailySeries unit tests (fake API, MemoryCache)
 tests/helpers/memory-cache.ts  in-memory JsonCache for tests
 tests/helpers/series.ts        makeSeries / seriesOf fixtures
-tests/analysis/*.test.ts       stats, trends, outliers, analyze/compare (reference values from Python)
+tests/analysis/*.test.ts       stats, trends, outliers, patterns, confidence, analyze/compare (reference values from Python)
 tests/integration/*.live.test.ts  live API tests (npm run test:integration)
 tests/integration/setup.ts     loads .env for live tests
 .env.example                   template for .env (WIKI_SKILL_CONTACT)
@@ -214,7 +255,11 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 - The CLI has only `version`. The client and resolver are not yet exposed through the CLI (Stage 9).
 - The cache and the analytics are not yet used by any command, because the CLI (Stage 9) does not exist yet.
 - The Mann–Kendall test assumes independent observations. Monthly averages are still autocorrelated, so p-values are somewhat optimistic. Weekly-basis trends (short periods) are the most affected.
-- The trend is monotonic/linear only. Level shifts, seasonality and structural breaks are not modelled (Stage 6 should flag them).
+- The trend is monotonic/linear only. Level shifts and seasonality are *flagged* (Stage 6), not modelled: the trend is still one Theil–Sen line.
+- Confidence thresholds are explicit, documented heuristics (`CONFIDENCE_THRESHOLDS`), not calibrated probabilities. They were checked on the assignment's cs/uk data only.
+- The level-shift detector finds at most one change point, needs a trend estimate (≥ 8 complete months or weeks), and ignores steps with fewer than 3 periods on one side. Pettitt is conservative on short series (e.g. n = 10: even a perfect 5/5 split gives p ≈ 0.066). The edition-shift note uses Pettitt significance and location only (not the step-vs-line check), because edition totals often combine a slow decline with a step.
+- Seasonality needs 22 complete months. With 2-year windows there are only 11 pairs, so weak seasonality goes undetected, and a level shift can distort the lag-12 correlation. Recent-vs-previous is therefore capped at medium whenever seasonality is unknown.
+- Ranking stability counts months only. It does not test whether a per-month difference is significant.
 - YoY compares the last 365 days with the 365 before. Leap days shift the alignment by one day.
 - In outlier detection, a sustained level shift produces a few flagged days until the rolling window catches up. Low-traffic series (a few views/day) can produce outliers from noise alone.
 - Normalization by edition totals controls for edition size, but not for audience composition or for how well the topic is covered in each edition.

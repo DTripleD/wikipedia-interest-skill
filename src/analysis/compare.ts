@@ -15,6 +15,8 @@ export interface ComparisonInput {
 }
 
 export interface RankRow {
+  /** Position of this series in `analyses` (input order). */
+  index: number;
   language: string;
   article: string | null;
   value: number;
@@ -70,7 +72,7 @@ export function compareLanguages(
 
 function rank(analyses: readonly SeriesAnalysis[], value: (a: SeriesAnalysis) => number): RankRow[] {
   const rows = analyses
-    .map((a) => ({ language: a.language, article: a.article, value: value(a) }))
+    .map((a, index) => ({ index, language: a.language, article: a.article, value: value(a) }))
     .sort((x, y) => y.value - x.value || x.language.localeCompare(y.language));
   const leader = rows[0]!.value;
   return rows.map((r) => ({ ...r, relativeToLeader: leader === 0 ? null : r.value / leader }));

@@ -6,7 +6,10 @@ import {
   median,
   medianAbsoluteDeviation,
   normalCdf,
+  pearson,
+  ranks,
   sampleStdDev,
+  spearman,
   sum,
 } from '../../src/analysis/stats.js';
 
@@ -43,5 +46,24 @@ describe('descriptive statistics', () => {
     expect(normalCdf(0)).toBeCloseTo(0.5, 7);
     expect(normalCdf(1.96)).toBeCloseTo(0.9750021048517796, 6);
     expect(normalCdf(-1)).toBeCloseTo(0.15865525393145713, 6);
+  });
+});
+
+// Reference values computed in Python (direct formulas).
+describe('ranks and correlation', () => {
+  it('gives tied values their average rank', () => {
+    expect(ranks([3, 1, 4, 1, 5])).toEqual([3, 1.5, 4, 1.5, 5]);
+  });
+
+  it('computes Pearson and Spearman correlations', () => {
+    expect(pearson([1, 2, 3, 4, 5], [2, 4, 5, 4, 5])).toBeCloseTo(0.7745966692414834, 12);
+    expect(spearman([1, 2, 2, 3, 10], [5, 6, 7, 8, 1])).toBeCloseTo(-0.051298917604257706, 12);
+    expect(spearman([1, 2, 3], [10, 100, 1000])).toBeCloseTo(1, 12);
+  });
+
+  it('returns null for a constant side or fewer than 2 pairs, and rejects unequal lengths', () => {
+    expect(pearson([1, 1, 1], [1, 2, 3])).toBeNull();
+    expect(pearson([1], [2])).toBeNull();
+    expect(() => pearson([1, 2], [1])).toThrow(RangeError);
   });
 });

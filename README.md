@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–5 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine) are complete. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–6 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model) are complete. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Architecture (summary)
@@ -35,7 +35,8 @@ src/
   data/           daily series model and monthly aggregation (series.ts),
                   file cache (cache.ts), cached incremental fetching (pageviews.ts)
   analysis/       statistics, trends (Theil–Sen, Mann–Kendall), outliers (Hampel),
-                  per-series analysis, cross-language comparison; confidence (Stage 6)
+                  level shifts (Pettitt) and seasonality, per-series analysis,
+                  cross-language comparison, evidence-based confidence (high/medium/low)
   charts/         Vega-Lite → SVG                               (Stage 7)
   reports/        one-page PDF via PDFKit                       (Stage 8)
 docs/             verified external API behavior (docs/wikimedia-api.md)
@@ -44,6 +45,28 @@ tests/integration live tests against the real Wikimedia API (opt-in)
 examples/         example requests and outputs
 evaluation/       cheap-model (Haiku 4.5) evaluation materials
 ```
+
+## Confidence model
+
+Every analysis gets a **high / medium / low** confidence level from explicit rules, never a
+made-up percentage. Each factor is rated `ok`, `caution` or `weak` with a plain-language
+reason:
+
+- period length;
+- traffic volume;
+- missing days;
+- share of views from spikes;
+- month-to-month consistency;
+- abrupt level shifts, noting when the whole edition shifted too;
+- how well the article matches the topic.
+
+The overall level is the weakest factor. Trends, year-over-year and recent changes get their
+own levels, which are never higher than the data level. Comparisons also check whether the
+ranking holds month by month. Thresholds live in `CONFIDENCE_THRESHOLDS` in
+`src/analysis/confidence.ts`.
+
+The confidence describes how reliable the numbers are **as a measure of Wikipedia attention**.
+Every assessment carries the caveat that pageviews are not market demand.
 
 ## Requirements
 

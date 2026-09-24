@@ -5,6 +5,7 @@ import {
   comparePeriods,
   mannKendall,
   movingAverage,
+  pettitt,
   theilSen,
 } from '../../src/analysis/trends.js';
 import { daysInclusive } from '../../src/dates.js';
@@ -75,6 +76,7 @@ describe('analyzeTrend', () => {
     const trend = analyzeTrend(series);
     if (!trend.available) throw new Error(trend.reason);
     expect(trend).toMatchObject({ basis: 'weekly', periods: 10, firstPeriod: '2024-01-01', lastPeriod: '2024-03-04' });
+    if (trend.available) expect(trend.periodLabels.slice(0, 2)).toEqual(['2024-01-01', '2024-01-08']);
     expect(trend.slopePerPeriod).toBe(-5);
     expect(trend.relativeChangePerYear).toBeCloseTo(-0.770592629026186, 9);
     expect(trend.relativeChangePerYear).toBeGreaterThan(-1);
@@ -133,5 +135,25 @@ describe('movingAverage', () => {
     expect(movingAverage(series.points, 1).map((p) => p.value)).toEqual([1, 2, 3, 4, 10]);
     expect(movingAverage(series.points, 3)[4]!.date).toBe('2024-01-05');
     expect(() => movingAverage(series.points, 0)).toThrow(RangeError);
+  });
+});
+
+// Reference values from a brute-force Python implementation of U_t.
+describe('pettitt', () => {
+  it('locates a step change', () => {
+    const p = pettitt([10, 11, 9, 10, 12, 3, 4, 2, 3, 4]);
+    expect(p).toMatchObject({ k: 25, changeIndex: 4 });
+    expect(p.pValue).toBeCloseTo(0.06614250297660204, 12);
+  });
+
+  it('also finds a change point in a steady trend', () => {
+    const p = pettitt([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(p).toMatchObject({ k: 36, changeIndex: 5 });
+    expect(p.pValue).toBeCloseTo(0.03140780113025614, 12);
+  });
+
+  it('caps the p-value at 1 and rejects tiny inputs', () => {
+    expect(pettitt([5, 3, 6, 2, 7, 4, 5, 3])).toMatchObject({ k: 4, changeIndex: 3, pValue: 1 });
+    expect(() => pettitt([1, 2])).toThrow(RangeError);
   });
 });

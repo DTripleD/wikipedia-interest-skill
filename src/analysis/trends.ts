@@ -67,6 +67,39 @@ export function mannKendall(ys: readonly number[]): MannKendall {
   return { s, z, pValue, tau: s / ((n * (n - 1)) / 2) };
 }
 
+export interface Pettitt {
+  /** max |U_t| over all split points. */
+  k: number;
+  /** Index of the last value before the most likely change point. */
+  changeIndex: number;
+  /** Approximate two-sided p-value: min(1, 2·exp(−6K² / (n³ + n²))). */
+  pValue: number;
+}
+
+/**
+ * Pettitt's (1979) non-parametric test for a single change point in the level of a series.
+ * U_t = Σ_{i≤t} Σ_{j>t} sign(y_i − y_j); the change point is where |U_t| is largest.
+ * A steady trend also produces a significant change point, so callers must compare it with
+ * a trend model before calling it a step (see patterns.ts).
+ */
+export function pettitt(ys: readonly number[]): Pettitt {
+  const n = ys.length;
+  if (n < 3) throw new RangeError('Pettitt needs at least 3 points.');
+  let u = 0;
+  let k = 0;
+  let changeIndex = 0;
+  // U_t = U_{t−1} + Σ_j sign(y_t − y_j).
+  for (let t = 0; t < n - 1; t++) {
+    for (let j = 0; j < n; j++) u += Math.sign(ys[t]! - ys[j]!);
+    if (Math.abs(u) > k) {
+      k = Math.abs(u);
+      changeIndex = t;
+    }
+  }
+  const pValue = Math.min(1, 2 * Math.exp((-6 * k * k) / (n ** 3 + n ** 2)));
+  return { k, changeIndex, pValue };
+}
+
 // ---------------------------------------------------------------------------
 // Trend of a pageview series
 // ---------------------------------------------------------------------------
@@ -81,6 +114,8 @@ export interface TrendResult {
   /** First and last period used (`YYYY-MM` or the Monday of the ISO week). */
   firstPeriod: string;
   lastPeriod: string;
+  /** Label of each period used (`YYYY-MM` or the Monday of the ISO week). */
+  periodLabels: string[];
   /** Average daily views of each period used. */
   values: number[];
   /** Theil–Sen change in average daily views per period (month or week). */
@@ -136,6 +171,7 @@ export function analyzeTrend(series: PageviewSeries): TrendResult | TrendUnavail
     periods: values.length,
     firstPeriod: periods[0]!.label,
     lastPeriod: periods[periods.length - 1]!.label,
+    periodLabels: periods.map((p) => p.label),
     values,
     slopePerPeriod: slope,
     fittedStart: intercept,

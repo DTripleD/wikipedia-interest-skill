@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { analyzeSeries } from '../../src/analysis/analyze.js';
 import { compareLanguages } from '../../src/analysis/compare.js';
 import { daysInclusive } from '../../src/dates.js';
-import { makeSeries, seriesOf } from '../helpers/series.js';
+import { makeSeries, monthlySeries, seriesOf } from '../helpers/series.js';
 
 const EDITION = { article: null };
 
@@ -60,6 +60,27 @@ describe('analyzeSeries', () => {
     expect(() => analyzeSeries(series, { editionSeries: other })).toThrow(/does not match/);
   });
 
+  it('reports year-over-year change with and without spike days', () => {
+    // 100/day for two years, plus one 5000-view day in the recent year.
+    const series = seriesOf('2023-01-01', 730, (i) => (i === 500 ? 5000 : 100));
+    const a = analyzeSeries(series);
+    expect(a.yearOverYear.available).toBe(true);
+    if (a.yearOverYear.available) {
+      expect(a.yearOverYear.relativeChange).toBeCloseTo(4900 / 36_500, 12);
+      expect(a.yearOverYear.relativeChangeExcludingSpikes).toBeCloseTo(0, 12);
+    }
+  });
+
+  it('measures deviation from the trend robustly and runs the pattern detectors', () => {
+    // 24 months on an exact line except one month far off it.
+    const levels = Array.from({ length: 24 }, (_, k) => (k === 10 ? 1000 : 100 + 5 * k));
+    const a = analyzeSeries(monthlySeries('2024-01', levels));
+    expect(a.volatility.trendDeviation).toBe(0);
+    expect(a.levelShift).toMatchObject({ assessed: true, detected: false });
+    expect(a.seasonality).toMatchObject({ assessed: true, pairs: 12 });
+    expect(analyzeSeries(seriesOf('2024-01-01', 20, () => 5)).volatility.trendDeviation).toBeNull();
+  });
+
   it('keeps the series warnings', () => {
     const series = { ...seriesOf('2024-01-01', 3, () => 1), warnings: ['clamped'] };
     expect(analyzeSeries(series).warnings).toEqual(['clamped']);
@@ -86,13 +107,13 @@ describe('compareLanguages', () => {
     expect(c.warnings[0]).toMatch(/pl\.wikipedia\/Post covers 2024-01-01\.\.2024-04-10/);
 
     expect(c.ranking.byTotalViews).toEqual([
-      { language: 'pl', article: 'Post', value: 200 * days, relativeToLeader: 1 },
-      { language: 'cs', article: 'Přerušovaný_půst', value: 100 * days, relativeToLeader: 0.5 },
+      { index: 1, language: 'pl', article: 'Post', value: 200 * days, relativeToLeader: 1 },
+      { index: 0, language: 'cs', article: 'Přerušovaný_půst', value: 100 * days, relativeToLeader: 0.5 },
     ]);
     // Per million: cs 100/1M = 100, pl 200/4M = 50 → cs leads once edition size is removed.
     expect(c.ranking.byViewsPerMillion).toEqual([
-      { language: 'cs', article: 'Přerušovaný_půst', value: 100, relativeToLeader: 1 },
-      { language: 'pl', article: 'Post', value: 50, relativeToLeader: 0.5 },
+      { index: 0, language: 'cs', article: 'Přerušovaný_půst', value: 100, relativeToLeader: 1 },
+      { index: 1, language: 'pl', article: 'Post', value: 50, relativeToLeader: 0.5 },
     ]);
   });
 
