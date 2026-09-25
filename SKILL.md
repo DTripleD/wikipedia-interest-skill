@@ -1,6 +1,6 @@
 ---
 name: wikipedia-interest-skill
-description: Measures and compares interest in a topic across Wikipedia language editions using Wikimedia pageview data. Resolves the topic to the right article in each language, computes totals, per-million normalization, year-over-year change, trends, spikes and an evidence-based confidence level, and can write charts and a one-page PDF report. Use when a user asks how interest in a topic changes over time, compares interest between languages or topics on Wikipedia, asks which language audiences or topics to research next, asks how much to trust such a trend, or wants a short shareable report on Wikipedia interest.
+description: Measures and compares interest in a topic across Wikipedia language editions using Wikimedia pageview data. Resolves the topic to the right article in each language, computes totals, per-million normalization, year-over-year change, trends, spikes and an evidence-based confidence level, and can write charts and, when the user asks for a report, a one-page PDF. Use when a user asks how interest in a topic changes over time, compares interest between languages or topics on Wikipedia, asks which language audiences or topics to research next, asks how much to trust such a trend, or wants a short shareable report on Wikipedia interest.
 license: MIT
 compatibility: Requires Node.js 22.12+ and npm, and internet access to wikipedia.org and wikimedia.org. Runs a local CLI with a shell tool.
 ---
@@ -22,10 +22,14 @@ purchase intent or willingness to pay. Every answer must say so.
    roughly equal and do not name a winner.
 3. **Views per million** means views per million pageviews of that Wikipedia edition. It is
    never per million people, residents or per capita.
-4. **Do only what was asked.** Make a PDF (`report`) only when the user asks for a report, PDF
-   or something to share. Never replace the topic with another or broader article (e.g.
-   `English language` for "learning English") without asking the user first.
-5. **Editions, not countries:** "Turkish Wikipedia", never "Turkey", and no flags.
+4. **PDF only when asked.** Use `report` when the user's words ask for a report, PDF or
+   something to share or send ("report", "звіт", "PDF", "shareable"). A question about trends,
+   growth or trust ("is interest growing?", "how far can we trust it?") gets `analyze` and no PDF.
+5. **Never switch the topic** to another or broader article (e.g. `English language` for
+   "learning English") without asking the user first.
+6. **Every answer says** that pageviews show attention on Wikipedia, not market demand or
+   willingness to pay (`limitations[0]`).
+7. **Editions, not countries:** "Turkish Wikipedia", never "Turkey", and no flags.
 
 ## 0. Setup
 
@@ -49,7 +53,7 @@ Extract five things:
 | **Topic** | The English Wikipedia article title for the concept, e.g. "interval fasting" → `Intermittent fasting`, "астрономія" → `Astronomy`. Use the specific concept, not the user's phrase ("interest in learning English" → `English as a second or foreign language`). If you do not know the English title, use the user's own word and add `--source <language of that word>`, e.g. `--topic "Астрономія" --source uk`. Never run a non-English word with the default English source. |
 | **Languages** | Wikipedia edition codes, comma-separated: `pl` Polish, `cs` Czech, `uk` Ukrainian, `de`, `fr`, `es`, `pt`, `it`, `ro`, `hu`, `tr`, `ru`, `ja`, `ko`, `zh`, `ar`, `hi`, `en` … (max 20). A language edition is an audience of readers of that language, not a country (`es` covers Spain and Latin America; `en` is global). The language the user writes in is **not** a language to analyze. |
 | **Period** | Default: last 24 months (no flag). "last year" → `--months 12`; "last 3 years" → `--months 36`; exact dates → `--start YYYY-MM-DD --end YYYY-MM-DD`. |
-| **Report?** | Use `report` only if the user asks for a report, PDF, something shareable or to send. Otherwise `analyze`. |
+| **Report?** | `report` only if the user asks for a report, PDF, something shareable or to send (Hard rule 4). Otherwise `analyze`. |
 | **Charts?** | Add `--charts` if the user asks for charts or graphs (writes SVG files). `report` already contains charts. |
 
 **Ask the user first (one short question, then stop) when:**
@@ -120,7 +124,7 @@ Use only these fields (full list: [references/output-fields.md](references/outpu
 - `confidence.level` (`high` / `medium` / `low`) and `confidence.reasons`: how far the numbers can be trusted as a measure of Wikipedia attention. Per-claim levels: `languages[].confidence.trend`, `.yearOverYear`, `.recentVsPrevious`.
 - `findings` — ready-made sentences computed by the code. Prefer them.
 - `limitations` — `limitations[0]` is the attention-not-demand caveat.
-- `warnings` — mention any that affect the answer (e.g. shortened period).
+- `warnings` — mention any that affect the answer (e.g. shortened period). If one says the data of an edition start later than the period ("re-run with --start …"), tell the user and offer that re-run.
 - `files` — paths of the PDF (`files.report`) and SVG charts (`files.charts`).
 
 ## 5. Write the answer

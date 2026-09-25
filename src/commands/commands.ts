@@ -4,8 +4,10 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve as resolvePath } from 'node:path';
+import { CONFIDENCE_THRESHOLDS } from '../analysis/confidence.js';
 import { renderSvg } from '../charts/render.js';
 import { PROJECT_ROOT } from '../config.js';
+import { addDays } from '../dates.js';
 import { buildReportModel, type ReportModel } from '../reports/content.js';
 import { renderReportPdf } from '../reports/pdf.js';
 import { parseAnalysisArgs, parseReportArgs, parseResolveArgs, type AnalysisArgs } from './args.js';
@@ -59,9 +61,23 @@ function reportModel(analysis: Analysis, args: AnalysisArgs, ctx: Context, note:
   });
 }
 
-/** Series and comparison warnings (clamped dates, trimmed days, common period), deduplicated. */
+/**
+ * Series and comparison warnings (clamped dates, trimmed days, common period), deduplicated, plus
+ * a hint when an article's data start well after the period start (created or renamed later):
+ * its early zeros drag down medians, trends and month-by-month rankings.
+ */
 function analysisWarnings(analysis: Analysis): string[] {
   const all = [...analysis.comparison.warnings, ...analysis.comparison.analyses.flatMap((a) => a.warnings.map((w) => `${a.language}: ${w}`))];
+  const late = analysis.comparison.analyses.flatMap((a) => {
+    const first = a.coverage.firstReportedDate;
+    return first !== null && first > addDays(a.period.start, CONFIDENCE_THRESHOLDS.coverage.lateStartDays) ? [{ language: a.language, first, start: a.period.start }] : [];
+  });
+  if (late.length > 0) {
+    // One date for the whole comparison: the latest start, so every edition has data from day one.
+    const latest = late.reduce((max, l) => (l.first > max ? l.first : max), late[0]!.first);
+    const which = late.map((l) => `${l.language} on ${l.first}`).join(', ');
+    all.push(`Data start later than ${late[0]!.start} for ${which} (the article may have been created or renamed then). For a fair picture, re-run with --start ${latest}.`);
+  }
   return [...new Set(all)];
 }
 

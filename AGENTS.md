@@ -34,10 +34,10 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 10 | SKILL.md                                | ✅ done     |
 | 11 | End-to-end scenarios                    | ✅ done     |
 | 12 | Cheap-model evaluation (Haiku 4.5)      | ✅ done     |
-| 13 | Edge cases and robustness               | ⏭ next      |
-| 14 | Final cleanup                           | pending     |
+| 13 | Edge cases and robustness               | ✅ done     |
+| 14 | Final cleanup                           | ⏭ next      |
 
-**Current stage:** Stage 12 is complete and awaiting review/commit (three Haiku runs evaluated in `evaluation/haiku-4.5.md`). Stage 13 (edge cases and robustness) comes next; it starts with the two SKILL.md items carried over from Stage 12 and the per-million rounding in the report (Stage 11).
+**Current stage:** Stage 13 is complete and awaiting review/commit (`evaluation/edge-cases.md`). Stage 14 (final cleanup) comes next.
 
 ## Decisions made (with the user)
 
@@ -285,6 +285,37 @@ Decisions (agreed with the user): each scenario is run by a **fresh subagent** t
 - **Coverage fact:** of 20 editions checked, `English as a second or foreign language` (Q130192) exists only in de, es, tr, id, ko, zh, ar (not pl, uk, cs, pt, it, fr, ru, ja, ro, hu, vi, hi, th). ko/zh/ar titles would be "?" in the PDF (font coverage).
 - **`scenarios.live.test.ts`:** the same flows through `run()` with the fixed period 2024-09-23..2026-09-22, temp cache and output: cs-only + pl missing (cs 6 716 views), the `--title` comparison (pl medium), uk astronomy step 2025-05/06 with edition change < −20 %, `--source uk` resolution, `learning English` → `TOPIC_AMBIGUOUS` with the ESL candidate, and the de/es/tr/pl/uk report (one-page PDF, pl/uk missing).
 
+### Edge cases and robustness (Stage 13) — `evaluation/edge-cases.md`
+
+Method: every case of the assignment's Stage 13 list was run through the built CLI against the live APIs (a scratchpad script printing a compact summary per envelope); cases that cannot be forced live are unit-tested with the fake Wikimedia. The full matrix (before/after) is in `evaluation/edge-cases.md`.
+
+Decisions (agreed with the user): resolve a title that differs only in letter case; add a `--start` hint for late-starting articles; flag a low-confidence per-million leader in the findings. **Not** changed (documented as limitations): the per-year trend rate on short periods and YoY after an article's creation.
+
+Changes:
+- **Resolver (`resolver.ts`):**
+  - A search result whose title equals the topic ignoring letter case / `_` is used (`sameTitleIgnoringCase`), with the note "differs only in letter case". The search result list is reused, so there is no second search. This is the only exception to "never auto-select", because titles are case-sensitive after the first letter (`Intermittent Fasting` is a missing page).
+  - Search sends `gsrinfo=suggestion`; when it finds nothing, the suggestion is searched once (`parseSuggestion`; `Astronmy` → `astronomy`).
+  - `parseSearch` accepts a `query` with `searchinfo` and no `pages`; before, that shape would have thrown `INVALID_RESPONSE`.
+- **No views at all:**
+  - `analyzeTrend` returns unavailable ("No views were reported in this period.");
+  - `summary.peakDay` is `null` when there are no views (the type is now nullable);
+  - findings say "no views reported" and "the article may not have existed yet";
+  - the volume factor says "no interest to measure";
+  - the timeline y-axis gets the domain [0, 1] (Vega collapsed it to "0.000000").
+- **Report formatting:** views per million use `formatSignificant` (3 significant digits) in the table and findings (0.12, 3.94, 57.5). `plural()` fixes "1 days" / "1 views" / "1 day(s)". The per-million leader finding adds "(<edition> has low data confidence: see Confidence)" when the leader's member level is low (tiny editions such as ga).
+- **CLI (`commands.ts`):** when an article's first reported day is more than `CONFIDENCE_THRESHOLDS.coverage.lateStartDays` (30) after the start, the warnings get one hint for the whole comparison: "Data start later than … for uk on …, pl on … For a fair picture, re-run with --start <latest>".
+- **SKILL.md:**
+  - Hard rule 4 is an explicit PDF trigger ("report/звіт/PDF/shareable" → `report`; trend or trust questions → `analyze`), and the frontmatter `description` now says a PDF is made when a report is asked for;
+  - new Hard rule 6 requires the attention-not-demand caveat in every answer;
+  - the `warnings` bullet tells the agent to offer the `--start` re-run.
+- **Tests:**
+  - resolver: case-only match, no auto-select for other differences, suggestion search, empty search, and a `searchinfo`-only parse;
+  - `tests/format.test.ts`;
+  - zero-view analysis, report findings and chart axis; the zero-view volume message; the low-confidence leader and 0.12 formatting;
+  - CLI: `SERVER_ERROR`, `NETWORK_ERROR`, `TIMEOUT` (also on edition totals only), and the `--start` hint (single and comparison);
+  - live: case-only title and typo suggestion (`resolver.live.test.ts`).
+- **Visual check (2026-09-25):** the zero-view uk `ChatGPT` 2021 report and the en/uk/ga comparison PDF were regenerated and inspected (`output/stage13/`, gitignored).
+
 ## Planned design (not yet implemented; revisit in each stage)
 
 ### Cheap-model evaluation (Stage 12) — `evaluation/haiku-4.5-runbook.md`, `evaluation/haiku-4.5.md`, `evaluation/scripts/`
@@ -300,7 +331,7 @@ Decisions (agreed with the user): 3 assignment scenarios + 3 robustness scenario
 - **Second Haiku run (same SKILL.md, bug fixed; scenarios 1, 3, 4, 5):** 1 and 4 better (per million read correctly; ranking reason passed on), 5 follow-up correct (`report --months 60`), but own ratios, the unasked `English language` switch, a missing confidence section (3), unrequested PDFs and PowerShell `&&` repeated → treated as instruction problems.
 - **SKILL.md changes applied after run 2:** Hard rules block (no own numbers, quote `relativeToLeaderPct`; copy confidence level + all reasons, unstable = roughly equal; per million = per million edition pageviews; `report` only on request; no topic switch without asking; editions not countries/flags); CLI invoked as `node "${CLAUDE_SKILL_DIR}/dist/cli.js"` (no `cd &&`); npm only if `dist/cli.js` is missing; exact ESL title in the topic example; confidence required in every answer. `tests/skill.test.ts` command regex updated. ≈ 3 100 tokens.
 - **Run 3 (new session, new SKILL.md; scenarios 1, 2, 3, 5):** no own numbers, no per-person reading, confidence + reasons always passed on, right ESL article without a switch, no PowerShell errors (full-path invocation), no `npm ci`; $0.03–0.05 per scenario. Left: an unrequested PDF in scenario 2 (Haiku sets `report: true` in the Skill args before reading SKILL.md) and no caveat in that answer; no PDF in scenario 3 despite "short report". The optional comparison sentence in `findings` is **not needed** (own ratios disappeared without it).
-- **Carried to Stage 13:** make the PDF trigger explicit in SKILL.md and in the frontmatter `description` ("report/звіт/PDF/to share" → `report`; trend or trust questions → `analyze`); add the attention-not-demand sentence to the Hard rules.
+- **Carried to Stage 13 (done there):** explicit PDF trigger in SKILL.md and the frontmatter `description`; the attention-not-demand sentence in the Hard rules.
 - **Evaluation helpers committed:** `evaluation/scripts/parse-session.mjs` (session log → timeline + usage) and `evaluation/scripts/check-session.mjs` (numbers in answers vs CLI output; coarse filter, hits reviewed by hand).
 - Scratchpad helpers (not in the repo): `parse-session.mjs` (log → readable timeline + usage) and `check-session.mjs` (numbers in answers vs CLI output). Worth moving into `evaluation/` if the second run happens.
 - Generated artifacts go to `output/` (gitignored).
@@ -341,7 +372,7 @@ assets/fonts/                  NotoSans-Regular.ttf, NotoSans-Bold.ttf (unhinted
 docs/wikimedia-api.md          verified Wikimedia API behavior + sources
 SKILL.md                       Agent Skill instructions for the agent (workflow, commands, errors, answer rules)
 references/output-fields.md    CLI JSON field glossary and error codes (loaded on demand)
-tests/*.test.ts                config, CLI (fake Wikimedia), date helper, font tests, SKILL.md consistency (skill.test.ts)
+tests/*.test.ts                config, CLI (fake Wikimedia), date helper, font tests, number formatting (format.test.ts), SKILL.md consistency (skill.test.ts)
 tests/helpers/fake-wikimedia.ts  URL-routed fake of the Action API and Pageviews API for CLI tests
 tests/wikipedia/*.test.ts      http, languages, api, resolver unit tests (scripted fetch, no network)
 tests/data/*.test.ts           series, cache, getDailySeries unit tests (fake API, MemoryCache)
@@ -355,6 +386,7 @@ tests/integration/*.live.test.ts  live API tests (npm run test:integration); sce
 tests/integration/setup.ts     loads .env for live tests
 .env.example                   template for .env (WIKI_SKILL_CONTACT)
 evaluation/end-to-end.md       Stage 11: method, check table, findings and transcripts of the three scenario runs
+evaluation/edge-cases.md       Stage 13: edge-case matrix (live CLI runs + unit-tested failures), before/after
 evaluation/haiku-4.5-runbook.md  Stage 12: how to run the six scenarios with Haiku 4.5 in Claude Code, expected behavior, checklist
 evaluation/haiku-4.5.md        Stage 12: results of three Haiku runs, bug found, cost, SKILL.md changes, remaining issues
 evaluation/scripts/*.mjs       session-log timeline (parse-session) and number check (check-session) used for the evaluation
@@ -370,6 +402,9 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 - CLI: `analyze`/`report` re-run the resolver each time (cached for 7 days). There is no separate fetch/chart command; SVGs come from `--charts`.
 - SKILL.md: exercised by Opus subagents (Stage 11) and three Haiku 4.5 runs (Stage 12). Haiku still decides on `report` vs `analyze` partly before reading SKILL.md (see evaluation/haiku-4.5.md). The drift test checks names, not behavior. Installing the skill for Claude Code means placing this folder under a skills directory (see README).
 - The analyst note (`--note`) must be English (the report is English); the agent's chat answer is in the user's language.
+- The trend's `relativeChangePerYear` extrapolates the fitted rate to a year even on short (weekly-basis) periods, which can give absurd rates (+31 799 % for 185 days with a step). The direction and p-value are sound. Kept as is at the user's decision (Stage 13).
+- Year-over-year and recent-vs-previous compare against imputed zeros when the article was created during the previous window (e.g. +4 539 %). The confidence is low and the CLI suggests a later `--start`. Kept as is at the user's decision (Stage 13).
+- The case-only title match uses the first search results (up to 5); a case variant that search ranks lower is not found.
 - The Mann–Kendall test assumes independent observations. Monthly averages are still autocorrelated, so p-values are somewhat optimistic. Weekly-basis trends (short periods) are the most affected.
 - The trend is monotonic/linear only. Level shifts and seasonality are *flagged* (Stage 6), not modelled: the trend is still one Theil–Sen line.
 - Confidence thresholds are explicit, documented heuristics (`CONFIDENCE_THRESHOLDS`), not calibrated probabilities. They were checked on the assignment's cs/uk data only.
@@ -400,4 +435,4 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 
 ## Remaining work
 
-Stages 13–14 (see the table above).
+Stage 14 (see the table above).

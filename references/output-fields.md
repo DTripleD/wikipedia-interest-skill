@@ -34,7 +34,7 @@ recompute them. Fields ending in `Pct` are percentages already multiplied by 100
   - `resolution: {confidence, method, notes?}`: how well the article matches the topic.
   - `totalViews`: all views in the period. `dailyMean`, `dailyMedian`: views per day.
   - `viewsPerMillion`: views per million views of the whole edition in the period. Use this to compare editions.
-  - `peakDay: {date, views}`.
+  - `peakDay: {date, views}`, or `null` when no views were reported in the period.
   - `yoyChangePct`: last 365 days vs the 365 before. `yoyChangeExcludingSpikesPct`: the same with spike days removed.
   - `recent90ChangePct`: last 90 days vs the 90 before (can be seasonal).
   - `trend`: `{direction: increasing|decreasing|no_significant_trend, perYearPct, significance, basis: monthly|weekly, periods}` or `{direction: "not_available", reason}`. `perYearPct` is the fitted compound change per year; describe it only as "about".

@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–12 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report, CLI, SKILL.md, end-to-end scenarios, cheap-model evaluation) are complete. See [evaluation/end-to-end.md](evaluation/end-to-end.md) for recorded agent runs of the assignment scenarios and [evaluation/haiku-4.5.md](evaluation/haiku-4.5.md) for the Claude Haiku 4.5 evaluation. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–13 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report, CLI, SKILL.md, end-to-end scenarios, cheap-model evaluation, edge cases) are complete. See [evaluation/end-to-end.md](evaluation/end-to-end.md) for recorded agent runs of the assignment scenarios and [evaluation/haiku-4.5.md](evaluation/haiku-4.5.md) for the Claude Haiku 4.5 evaluation; [evaluation/edge-cases.md](evaluation/edge-cases.md) lists the edge cases tested. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Using it as an Agent Skill

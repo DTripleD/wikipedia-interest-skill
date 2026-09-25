@@ -160,11 +160,20 @@ The lookup query is `titles=<t>&redirects=1&prop=pageprops|description[|langlink
 
 ### Search
 
-The search query is `generator=search&gsrsearch=<text>&gsrnamespace=0&gsrlimit=N&prop=pageprops|description`.
+The search query is `generator=search&gsrsearch=<text>&gsrnamespace=0&gsrlimit=N&gsrinfo=suggestion&prop=pageprops|description`.
 
 - Pages carry an `index` field (the search rank), but `pages` is **not** sorted by it, so the
   parser sorts. [verified]
-- When there are no results, the `query` key is absent. [verified]
+- When there are no results, the `query` key is absent. [verified] With `gsrinfo=suggestion`, a
+  search with no results returns `query.searchinfo` and no `pages`. [verified 2026-09-25]
+- **Spelling suggestion:** `gsrinfo=suggestion` (or `srinfo=suggestion` for `list=search`)
+  adds `query.searchinfo.suggestion`. Examples: `Astronmy` → `astronomy`, `Intermitent fasting`
+  → `intermittent fasting`; no suggestion for nonsense. [verified 2026-09-25] The resolver
+  searches the suggestion once when the original search finds nothing.
+- **Titles are case-sensitive after the first letter:** `Intermittent Fasting` is a missing
+  page on en.wikipedia (there is no redirect), while search ranks `Intermittent fasting` first.
+  [verified 2026-09-25] The resolver uses a search result whose title differs from the topic
+  only in letter case.
 - **Search in a foreign-language wiki with an English topic returns mostly unrelated pages.**
   For example, `pl` + "intermittent fasting" → `Stres oksydacyjny`, `Głodówka lecznicza`, …,
   and `no` + "English as a second or foreign language" → `USA`, `Giorgia Meloni`, ….

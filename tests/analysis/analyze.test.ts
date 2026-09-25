@@ -7,6 +7,13 @@ import { makeSeries, monthlySeries, seriesOf } from '../helpers/series.js';
 const EDITION = { article: null };
 
 describe('analyzeSeries', () => {
+  it('reports no trend and no peak day when no views were reported at all', () => {
+    const a = analyzeSeries(makeSeries('2021-01-01', Array(365).fill(null)));
+    expect(a.summary).toMatchObject({ totalViews: 0, peakDay: null });
+    expect(a.trend).toEqual({ available: false, reason: 'No views were reported in this period.' });
+    expect(a.levelShift.assessed).toBe(false);
+  });
+
   it('summarizes a short series and marks unavailable metrics with reasons', () => {
     const series = makeSeries('2024-01-30', [10, 20, null, 30]); // Jan 30 .. Feb 2
     const a = analyzeSeries(series);

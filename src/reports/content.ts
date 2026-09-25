@@ -11,7 +11,7 @@ import { editionShiftWithStep, type ComparisonAssessment, type ConfidenceLevel, 
 import { comparisonSpec, timelineSpec, yoySpec } from '../charts/charts.js';
 import { sliceSeries, type PageviewSeries } from '../data/series.js';
 import { missingGlyphs } from '../fonts.js';
-import { formatInteger, formatNumber, formatSignedPercent } from '../format.js';
+import { formatInteger, formatNumber, formatSignedPercent, formatSignificant, plural } from '../format.js';
 
 export const MAX_ANALYST_NOTE_CHARS = 600;
 export const MAX_TOPIC_CHARS = 120;
@@ -102,7 +102,7 @@ export function buildReportModel(input: ReportInput): ReportModel {
   const imputed = analyses.reduce((n, a) => n + a.coverage.imputedDays, 0);
   // The caveats start with DEMAND_CAVEAT, so it always survives the MAX_LIMITATIONS cut.
   const limitations = [...(single ? assessment.members[0]!.caveats : assessment.caveats)];
-  if (imputed > 0) limitations.push(`Days the API reported no views for are counted as zero (${imputed} day(s) in total).`);
+  if (imputed > 0) limitations.push(`Days the API reported no views for are counted as zero (${plural(imputed, 'day')} in total).`);
 
   const charts: ReportChart[] = single
     ? [{ id: 'timeline', spec: timelineSpec(sliceSeries(input.series[0]!, start, end), analyses[0]!, { height: 150 }) }]
@@ -140,7 +140,7 @@ function tableRow(label: string, a: SeriesAnalysis, member: SeriesAssessment): s
     a.article === null ? '(all articles)' : a.article.replaceAll('_', ' '),
     formatInteger(a.summary.totalViews),
     formatNumber(a.summary.dailyMedian),
-    a.normalization ? formatNumber(a.normalization.viewsPerMillion) : '—',
+    a.normalization ? formatSignificant(a.normalization.viewsPerMillion) : '—',
     a.yearOverYear.available && a.yearOverYear.relativeChange !== null ? formatSignedPercent(a.yearOverYear.relativeChange) : 'n/a',
     trend,
     member.level,
@@ -155,11 +155,14 @@ function findings(input: ReportInput, labels: readonly string[], order: readonly
   if (analyses.length > 1) {
     const perMillion = comparison.ranking.byViewsPerMillion;
     const ranking = perMillion ?? comparison.ranking.byTotalViews;
-    const top = ranking.slice(0, 4).map((r) => `${labels[r.index]} (${perMillion ? formatNumber(r.value) : formatInteger(r.value)})`);
+    const top = ranking.slice(0, 4).map((r) => `${labels[r.index]} (${perMillion ? formatSignificant(r.value) : formatInteger(r.value)})`);
+    // A tiny edition can lead per million on a handful of views; say so where the lead is stated.
+    const leaderLow = assessment.members[ranking[0]!.index]?.level === 'low';
+    const caveat = leaderLow ? ` (${labels[ranking[0]!.index]} has low data confidence: see Confidence)` : '';
     out.push(
       perMillion
-        ? `Highest interest relative to edition size: ${top.join(', ')} views per million edition pageviews.`
-        : `Most views: ${top.join(', ')}. Raw totals favour larger editions (edition totals were not available).`,
+        ? `Highest interest relative to edition size: ${top.join(', ')} views per million edition pageviews${caveat}.`
+        : `Most views: ${top.join(', ')}${caveat}. Raw totals favour larger editions (edition totals were not available).`,
     );
     // An unstable ranking already appears under Confidence; here only the positive fact.
     const stability = assessment.factors.find((f) => f.id === 'ranking_stability');
@@ -170,7 +173,12 @@ function findings(input: ReportInput, labels: readonly string[], order: readonly
 
   if (analyses.length === 1) {
     const a = analyses[0]!;
-    out.push(`Typical day: ${formatNumber(a.summary.dailyMedian)} views (median); busiest day ${a.summary.peakDay.date} with ${formatInteger(a.summary.peakDay.views)} views.`);
+    const peak = a.summary.peakDay;
+    out.push(
+      peak === null
+        ? 'No views were reported in this period: the article may not have existed yet under this title.'
+        : `Typical day: ${formatNumber(a.summary.dailyMedian)} ${a.summary.dailyMedian === 1 ? 'view' : 'views'} (median); busiest day ${peak.date} with ${plural(peak.views, 'view').replace(/^\d+/, formatInteger(peak.views))}.`,
+    );
     if (a.seasonality.assessed && a.seasonality.detected) out.push('Interest follows a seasonal pattern that repeats every year.');
   }
   if (analyses.length > MAX_SERIES_FINDINGS) out.push('Other editions: see the table.');
@@ -182,7 +190,8 @@ function findings(input: ReportInput, labels: readonly string[], order: readonly
 function seriesFinding(label: string, a: SeriesAnalysis, member: SeriesAssessment): string {
   const parts: string[] = [];
   const t = a.trend;
-  if (!t.available) parts.push('period too short for a trend');
+  if (a.summary.totalViews === 0) parts.push('no views reported');
+  else if (!t.available) parts.push('period too short for a trend');
   else if (t.direction === 'no_significant_trend') parts.push('no clear trend');
   else parts.push(t.relativeChangePerYear === null ? t.direction : `${t.direction} (about ${formatSignedPercent(t.relativeChangePerYear)} per year)`);
 

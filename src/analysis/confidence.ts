@@ -17,7 +17,7 @@ import type { ResolutionConfidence } from '../wikipedia/resolver.js';
 import type { AnalyzedComparison, SeriesAnalysis } from './analyze.js';
 import { seriesLabels, type LanguageComparison } from './compare.js';
 import { addDays } from '../dates.js';
-import { formatNumber as fmt, formatPercent as pct, formatPValue as pValue, formatSignedPercent as signedPct } from '../format.js';
+import { formatNumber as fmt, formatPValue as pValue, formatPercent as pct, formatSignedPercent as signedPct, plural } from '../format.js';
 import { SIGNIFICANCE_LEVEL } from './trends.js';
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
@@ -176,7 +176,7 @@ function resolutionFactor(resolution: ResolutionEvidence): Factor {
 function periodFactor(a: SeriesAnalysis): Factor {
   const days = a.period.days;
   if (days < T.period.weakBelow) {
-    return { id: 'period', status: 'weak', value: days, message: `Only ${days} days of data: too short for a reliable trend or period comparisons.` };
+    return { id: 'period', status: 'weak', value: days, message: `Only ${plural(days, 'day')} of data: too short for a reliable trend or period comparisons.` };
   }
   if (days < T.period.cautionBelow) {
     return {
@@ -191,6 +191,9 @@ function periodFactor(a: SeriesAnalysis): Factor {
 
 function volumeFactor(a: SeriesAnalysis): Factor {
   const m = a.summary.dailyMedian;
+  if (a.summary.totalViews === 0) {
+    return { id: 'volume', status: 'weak', value: 0, message: 'No views at all in this period, so there is no interest to measure.' };
+  }
   const base = `Median of ${fmt(m)} views/day`;
   if (m < T.volume.weakBelow) {
     return { id: 'volume', status: 'weak', value: m, message: `${base}: very low traffic, so single events and random noise dominate the numbers.` };

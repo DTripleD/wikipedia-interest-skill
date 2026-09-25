@@ -158,6 +158,7 @@ export function analyzeTrend(series: PageviewSeries): TrendResult | TrendUnavail
   }
 
   const values = periods.map((p) => p.value);
+  if (values.every((v) => v === 0)) return { available: false, reason: 'No views were reported in this period.' };
   const { slope, intercept } = theilSen(values);
   const mk = mannKendall(values);
   const perYear = basis === 'monthly' ? 12 : 365.25 / 7;

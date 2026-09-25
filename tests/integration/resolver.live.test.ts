@@ -33,6 +33,19 @@ describe('resolveTopic (live)', () => {
     expect(result.results[0]!.status).toBe('ambiguous');
   });
 
+  it('resolves a title that differs only in letter case (observed 2026-09-25)', async () => {
+    const r = await resolveTopic({ topic: 'Intermittent Fasting', languages: ['cs'] }, options);
+    expect(r.source).toMatchObject({ status: 'found', article: 'Intermittent fasting', confidence: 'high' });
+    expect(r.source.notes[0]).toMatch(/differs only in letter case/);
+    expect(r.results[0]).toMatchObject({ status: 'resolved', article: 'Přerušovaný půst' });
+  });
+
+  it("offers candidates for a typo via MediaWiki's spelling suggestion (observed 2026-09-25)", async () => {
+    const r = await resolveTopic({ topic: 'Astronmy', languages: ['uk'] }, options);
+    expect(r.source.status).toBe('not_found');
+    expect(r.source.candidates[0]?.title).toBe('Astronomy');
+  });
+
   it('reports a nonexistent language edition', async () => {
     const result = await resolveTopic({ topic: 'Astronomy', languages: ['xx'] }, options);
     expect(result.results[0]!.status).toBe('language_unavailable');

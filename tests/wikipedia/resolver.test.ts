@@ -4,6 +4,7 @@ import {
   RESOLVER_CACHE_TTL_MS,
   parseLookup,
   parseSearch,
+  parseSuggestion,
   resolveTopic,
   type ResolveRequest,
 } from '../../src/wikipedia/resolver.js';
@@ -193,6 +194,59 @@ describe('resolveTopic: source article', () => {
     expect(result.source.status).toBe('not_found');
     expect(result.source.candidates.map((c) => c.title)).toEqual(['Intermittent fasting', 'Fasting']);
     expect(result.results[0]).toMatchObject({ status: 'not_found', article: null });
+  });
+
+  it('uses a search result that differs from the topic only in letter case', async () => {
+    const { result, calls } = await resolve(
+      { topic: 'Intermittent Fasting', languages: ['cs'] },
+      {
+        'en|lookup|Intermittent Fasting': missing('Intermittent Fasting'),
+        'en|search|Intermittent Fasting': results(['Intermittent fasting', { qid: 'Q1666254' }], ['Fasting', { qid: 'Q44602' }]),
+        'en|lookup|Intermittent fasting': IF_EN,
+        'cs|lookup|Přerušovaný půst': page('Přerušovaný půst', { qid: 'Q1666254' }),
+      },
+    );
+    expect(result.source).toMatchObject({ status: 'found', article: 'Intermittent fasting', confidence: 'high', candidates: [] });
+    expect(result.source.notes[0]).toMatch(/differs only in letter case/);
+    expect(result.results[0]).toMatchObject({ status: 'resolved', article: 'Přerušovaný půst', confidence: 'high' });
+    expect(calls.filter((c) => c.startsWith('en|search'))).toHaveLength(1); // the search is not repeated
+  });
+
+  it('does not auto-select a search result that differs by more than letter case', async () => {
+    const { result } = await resolve(
+      { topic: 'Intermittent fastings', languages: ['cs'] },
+      {
+        'en|lookup|Intermittent fastings': missing('Intermittent fastings'),
+        'en|search|Intermittent fastings': results(['Intermittent fasting', { qid: 'Q1666254' }]),
+      },
+    );
+    expect(result.source).toMatchObject({ status: 'not_found', article: null });
+    expect(result.source.candidates.map((c) => c.title)).toEqual(['Intermittent fasting']);
+  });
+
+  it("searches MediaWiki's spelling suggestion when a typo finds nothing", async () => {
+    const { result, calls } = await resolve(
+      { topic: 'Astronmy', languages: ['uk'] },
+      {
+        'en|lookup|Astronmy': missing('Astronmy'),
+        'en|search|Astronmy': { batchcomplete: true, query: { searchinfo: { suggestion: 'astronomy' } } },
+        'en|search|astronomy': results(['Astronomy', { qid: 'Q333' }], ['Astronomer', { qid: 'Q11063' }]),
+      },
+    );
+    expect(result.source.status).toBe('not_found'); // candidates are still only candidates
+    expect(result.source.candidates.map((c) => c.title)).toEqual(['Astronomy', 'Astronomer']);
+    expect(calls).toEqual(['en|lookup|Astronmy', 'en|search|Astronmy', 'en|search|astronomy']);
+  });
+
+  it('returns no candidates when search and suggestion find nothing', async () => {
+    const { result } = await resolve(
+      { topic: 'Xqzzy foobarium', languages: ['uk'] },
+      {
+        'en|lookup|Xqzzy foobarium': missing('Xqzzy foobarium'),
+        'en|search|Xqzzy foobarium': { batchcomplete: true, query: { searchinfo: {} } },
+      },
+    );
+    expect(result.source).toMatchObject({ status: 'not_found', candidates: [] });
   });
 
   it('rejects invalid titles and non-article namespaces', async () => {
@@ -407,6 +461,13 @@ describe('parsers', () => {
 
   it('parseSearch returns [] when MediaWiki omits "query" (no results)', () => {
     expect(parseSearch({ batchcomplete: true })).toEqual([]);
+  });
+
+  it('parseSearch returns [] and parseSuggestion reads the suggestion when only searchinfo is present', () => {
+    const body = { batchcomplete: true, query: { searchinfo: { suggestion: 'astronomy', suggestionsnippet: 'astronomy' } } };
+    expect(parseSearch(body)).toEqual([]);
+    expect(parseSuggestion(body)).toBe('astronomy');
+    expect(parseSuggestion({ batchcomplete: true })).toBeNull();
   });
 
   it('parseSearch orders by search rank, not by page order', () => {

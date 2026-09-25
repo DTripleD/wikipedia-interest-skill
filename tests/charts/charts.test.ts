@@ -6,7 +6,7 @@ import { renderSvg, toChart } from '../../src/charts/render.js';
 import { CATEGORICAL } from '../../src/charts/theme.js';
 import { addDays } from '../../src/dates.js';
 import { missingGlyphs } from '../../src/fonts.js';
-import { monthlySeries, seriesOf } from '../helpers/series.js';
+import { makeSeries, monthlySeries, seriesOf } from '../helpers/series.js';
 
 // The specs are plain JSON; these helpers dig into them without the Vega-Lite union types.
 type Json = Record<string, any>;
@@ -19,6 +19,13 @@ const edition = (language: string, perDay: number, months = 24) =>
   monthlySeries('2023-01', Array(months).fill(perDay), { language, project: `${language}.wikipedia`, article: null });
 
 describe('timelineSpec', () => {
+  it('keeps a readable 0..1 axis when no views were reported at all', async () => {
+    const series = makeSeries('2021-01-01', Array(120).fill(null));
+    const spec = JSON.stringify(timelineSpec(series, analyzeSeries(series)));
+    expect(spec).toContain('"domain":[0,1]');
+    expect(await renderSvg(timelineSpec(series, analyzeSeries(series)))).not.toContain('0.000000');
+  });
+
   it('draws daily views, the 28-day average, the trend and the level shift', () => {
     const series = stepSeries();
     const analysis = analyzeSeries(series);

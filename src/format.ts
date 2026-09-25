@@ -5,6 +5,16 @@ export function formatNumber(x: number): string {
   return Math.abs(x) >= 100 ? String(Math.round(x)) : String(Math.round(x * 10) / 10);
 }
 
+/** Three significant digits for small ratios: 0.1234 → "0.123", 3.97 → "3.97", 57.56 → "57.6", 221.1 → "221". */
+export function formatSignificant(x: number): string {
+  return Math.abs(x) >= 100 ? String(Math.round(x)) : String(Number(x.toPrecision(3)));
+}
+
+/** 1 → "1 day", 3 → "3 days" (English messages only). */
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
 /** 0.183 → "18%". */
 export function formatPercent(share: number): string {
   return `${Math.round(share * 100)}%`;

@@ -20,6 +20,13 @@ const assess = (values: ReadonlyArray<number | null>) => assessSeries(analyzeSer
 const steady = (): SeriesAnalysis => analyzeSeries(monthlySeries('2023-01', Array.from({ length: 24 }, (_, k) => 1000 + 20 * k)));
 
 describe('assessSeries', () => {
+  it('says there is nothing to measure when no views were reported', () => {
+    const a = assessSeries(analyzeSeries(makeSeries('2021-01-01', Array(365).fill(null))));
+    const volume = a.factors.find((f) => f.id === 'volume')!;
+    expect(volume).toMatchObject({ status: 'weak', message: 'No views at all in this period, so there is no interest to measure.' });
+    expect(a.level).toBe('low');
+  });
+
   it('rates clean, long, high-traffic data high, with the demand caveat', () => {
     const a = assessSeries(steady(), { confidence: 'high', notes: [] });
     expect(a.level).toBe('high');

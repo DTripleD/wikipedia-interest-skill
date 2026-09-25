@@ -5,7 +5,10 @@
  * 1. Anchor: look the topic up as a title in the *source* edition (default `en`), following
  *    redirects and reading its Wikidata item, disambiguation flag and interlanguage links.
  *    - If the topic is missing or lands on a disambiguation page, the source is unresolved:
- *      full-text search candidates are returned and NOTHING is auto-selected.
+ *      full-text search candidates are returned and NOTHING is auto-selected. The one
+ *      exception is a search result whose title differs from the topic only in letter case
+ *      ("Intermittent Fasting" → "Intermittent fasting"): that is the same title, so it is used.
+ *      When search finds nothing, MediaWiki's spelling suggestion is searched once (typos).
  * 2. Targets: for each target edition, follow the anchor's interlanguage link (these come
  *    from Wikidata sitelinks, so they point to the same concept), then verify the linked
  *    page in the target wiki (canonical title, redirect, disambiguation).
@@ -127,7 +130,23 @@ export async function resolveTopic(request: ResolveRequest, options: ResolverOpt
     }
     throw err;
   }
-  const source = await resolveSource(ctx, sourceEdition, topic, sourcePage);
+  // A title that differs only in letter case ("Intermittent Fasting") is the same article, not an
+  // ambiguity: MediaWiki titles are case-sensitive after the first letter, so look it up via search.
+  let searchResults: Candidate[] | undefined;
+  let caseNote: string | null = null;
+  if (!sourcePage.exists && sourcePage.invalidReason === null) {
+    searchResults = await search(ctx, sourceEdition, topic);
+    const match = searchResults.find((c) => sameTitleIgnoringCase(c.title, topic));
+    if (match) {
+      const page = await lookupTitle(ctx, sourceEdition, match.title, true);
+      if (page.exists && page.namespace === 0) {
+        caseNote = `No article is titled exactly "${topic}" on ${sourceEdition}.wikipedia; using "${page.title}", which differs only in letter case.`;
+        sourcePage = page;
+      }
+    }
+  }
+  const source = await resolveSource(ctx, sourceEdition, topic, sourcePage, searchResults);
+  if (caseNote) source.notes.unshift(caseNote);
 
   const results: LanguageResolution[] = [];
   for (const edition of targets) {
@@ -179,7 +198,13 @@ function validateRequest(request: ResolveRequest) {
   return { topic, sourceEdition, targets, titles, maxCandidates };
 }
 
-async function resolveSource(ctx: Ctx, edition: string, topic: string, page: PageInfo): Promise<SourceResolution> {
+/** Title equality ignoring letter case and "_" vs " " (MediaWiki treats underscores as spaces). */
+function sameTitleIgnoringCase(a: string, b: string): boolean {
+  const norm = (t: string) => t.replaceAll('_', ' ').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en');
+  return norm(a) === norm(b);
+}
+
+async function resolveSource(ctx: Ctx, edition: string, topic: string, page: PageInfo, searchResults?: Candidate[]): Promise<SourceResolution> {
   const base: SourceResolution = {
     language: edition,
     status: 'not_found',
@@ -197,7 +222,7 @@ async function resolveSource(ctx: Ctx, edition: string, topic: string, page: Pag
     return {
       ...base,
       notes: [problem, SEARCH_NOTE, retry],
-      candidates: await search(ctx, edition, topic),
+      candidates: searchResults ?? (await search(ctx, edition, topic)),
     };
   }
   if (page.isDisambiguation) {
@@ -445,23 +470,43 @@ export function parseLookup(body: Record<string, unknown>, requestedTitle: strin
   };
 }
 
-async function search(ctx: Ctx, edition: string, text: string): Promise<Candidate[]> {
+/**
+ * Full-text search. When nothing matches (typically a typo, e.g. "Astronmy"), MediaWiki's spelling
+ * suggestion ("astronomy") is searched once instead. Candidates are never auto-selected.
+ */
+async function search(ctx: Ctx, edition: string, text: string, allowSuggestion = true): Promise<Candidate[]> {
   const body = await callApi(ctx, edition, {
     generator: 'search',
     gsrsearch: text,
     gsrnamespace: '0',
     gsrlimit: String(ctx.maxCandidates + 1), // +1 leaves room for a filtered-out disambiguation page
+    gsrinfo: 'suggestion',
     prop: 'pageprops|description',
     ppprop: 'disambiguation|wikibase_item',
   });
-  return parseSearch(body).slice(0, ctx.maxCandidates);
+  const candidates = parseSearch(body).slice(0, ctx.maxCandidates);
+  const suggestion = parseSuggestion(body);
+  if (candidates.length === 0 && allowSuggestion && suggestion !== null && !sameTitleIgnoringCase(suggestion, text)) {
+    return search(ctx, edition, suggestion, false);
+  }
+  return candidates;
+}
+
+/** Exported for tests: MediaWiki's spelling suggestion (query.searchinfo.suggestion), if any. */
+export function parseSuggestion(body: Record<string, unknown>): string | null {
+  const query = body['query'];
+  const info = isObject(query) ? query['searchinfo'] : undefined;
+  const suggestion = isObject(info) ? info['suggestion'] : undefined;
+  return typeof suggestion === 'string' && suggestion.trim() !== '' ? suggestion : null;
 }
 
 /** Exported for tests: parses generator=search results into ranked non-disambiguation candidates. */
 export function parseSearch(body: Record<string, unknown>): Candidate[] {
   const query = body['query'];
   if (query === undefined) return []; // no results: MediaWiki omits "query" entirely
-  if (!isObject(query) || !Array.isArray(query['pages'])) throw invalidResponse('missing "query.pages" in search results.');
+  if (!isObject(query)) throw invalidResponse('missing "query" in search results.');
+  if (query['pages'] === undefined) return []; // no results, but "query.searchinfo" (suggestion) is present
+  if (!Array.isArray(query['pages'])) throw invalidResponse('"query.pages" in search results is not an array.');
 
   return query['pages']
     .filter(isObject)

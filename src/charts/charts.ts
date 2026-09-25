@@ -49,11 +49,13 @@ export function timelineSpec(series: PageviewSeries, analysis: SeriesAnalysis, s
   const colors = [DEEMPHASIS, CATEGORICAL[0], CATEGORICAL[1]];
   const color = (key: string) => ({ datum: key, scale: { domain: keys, range: colors.slice(0, keys.length) } });
   const axisCap = analysis.dailyAxisCap;
+  // With no views at all Vega would collapse the axis to [0, 0] (labelled "0.000000").
+  const domain = axisCap ? [0, axisCap.cap] : analysis.summary.totalViews === 0 ? [0, 1] : null;
   const y = (title?: string) => ({
     field: 'value',
     type: 'quantitative',
     ...(title ? { title } : {}),
-    ...(axisCap ? { scale: { domain: [0, axisCap.cap] } } : {}),
+    ...(domain ? { scale: { domain } } : {}),
   });
   const line = (extra: Record<string, unknown> = {}) => ({ type: 'line', clip: true, ...extra });
 

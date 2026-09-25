@@ -4,7 +4,7 @@ import { DEMAND_CAVEAT, assessComparison } from '../../src/analysis/confidence.j
 import type { PageviewSeries } from '../../src/data/series.js';
 import { MAX_ANALYST_NOTE_CHARS, MAX_TABLE_ROWS, buildReportModel, type ReportInput } from '../../src/reports/content.js';
 import { generateReport } from '../../src/reports/pdf.js';
-import { monthlySeries, seriesOf } from '../helpers/series.js';
+import { makeSeries, monthlySeries, seriesOf } from '../helpers/series.js';
 
 const GENERATED = new Date('2026-09-25T12:00:00Z');
 const wiggle = (k: number, amp: number): number => (k % 2 === 0 ? amp : -amp);
@@ -32,6 +32,22 @@ const twoLanguages = (): ComparisonInput[] => [
 ];
 
 describe('buildReportModel', () => {
+  it('says plainly that no views were reported, instead of a trend or a busiest day', () => {
+    const m = buildReportModel(input([{ series: makeSeries('2021-01-01', Array(365).fill(null)), editionSeries: monthlySeries('2021-01', Array(12).fill(1_000_000), { article: null }) }]));
+    expect(m.findings).toContain('cs: no views reported.');
+    expect(m.findings).toContain('No views were reported in this period: the article may not have existed yet under this title.');
+    expect(m.findings.join(' ')).not.toMatch(/busiest day/);
+  });
+
+  it('formats small per-million values with three significant digits and flags a low-confidence leader', () => {
+    // ga-like: 1 view/day in a 20k/day edition (50 per million, but low volume); cs: 100/day in 1M/day.
+    const tiny: ComparisonInput = { series: monthlySeries('2023-01', Array(24).fill(1), { language: 'ga', project: 'ga.wikipedia', article: 'Tiny' }), editionSeries: edition('ga', 20_000) };
+    const small: ComparisonInput = { series: monthlySeries('2023-01', Array.from({ length: 24 }, (_, k) => 120 + wiggle(k, 5))), editionSeries: edition('cs', 1_000_000_000) };
+    const m = buildReportModel(input([tiny, small]));
+    expect(m.findings[0]).toBe('Highest interest relative to edition size: ga (50), cs (0.12) views per million edition pageviews (ga has low data confidence: see Confidence).');
+    expect(m.table.rows[1]![4]).toBe('0.12');
+  });
+
   it('builds a comparison report from computed numbers only', () => {
     const m = buildReportModel(input(twoLanguages(), { missing: [{ language: 'uk', reason: 'no article linked to the topic' }] }));
     expect(m.title).toBe('Wikipedia interest: intermittent fasting');

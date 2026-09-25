@@ -189,6 +189,31 @@ describe('cli: analyze', () => {
   it('passes Wikimedia error codes through', async () => {
     const result = await run(['analyze', '--topic', 'Intermittent fasting', '--languages', 'cs'], deps({}, { ...WIKI, pageviewsStatus: 429 }));
     expect(result).toMatchObject({ ok: false, error: { code: 'RATE_LIMITED' } });
+    const server = await run(['analyze', '--topic', 'Intermittent fasting', '--languages', 'cs'], deps({}, { ...WIKI, pageviewsStatus: 503 }));
+    expect(server).toMatchObject({ ok: false, error: { code: 'SERVER_ERROR' } });
+  });
+
+  it('reports network failures and timeouts as structured errors, also when only the edition totals fail', async () => {
+    const failing = (error: Error, when: (url: string) => boolean): Partial<CliDeps> => {
+      const fake = fakeWikimedia(WIKI);
+      return { fetch: (input, init) => (when(String(input)) ? Promise.reject(error) : fake.fetch(input, init)) };
+    };
+    const network = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) });
+    const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    const args = ['analyze', '--topic', 'Intermittent fasting', '--languages', 'cs'];
+    expect(await run(args, deps(failing(network, (u) => u.includes('wikimedia.org'))))).toMatchObject({ ok: false, error: { code: 'NETWORK_ERROR' } });
+    expect(await run(args, deps(failing(timeout, (u) => u.includes('wikimedia.org'))))).toMatchObject({ ok: false, error: { code: 'TIMEOUT' } });
+    expect(await run(args, deps(failing(timeout, (u) => u.includes('/aggregate/'))))).toMatchObject({ ok: false, error: { code: 'TIMEOUT' } });
+  });
+
+  it('suggests a later --start when an article has no data for the first part of the period', async () => {
+    const late: FakeWikimediaOptions = { ...WIKI, views: (project, article, date) => (article !== null && date < '2025-06-01' ? undefined : WIKI.views(project, article, date)) };
+    const data = ok(await run(['analyze', '--topic', 'Intermittent fasting', '--languages', 'cs'], deps({}, late)));
+    expect(data.warnings).toContain('Data start later than 2024-09-25 for cs on 2025-06-01 (the article may have been created or renamed then). For a fair picture, re-run with --start 2025-06-01.');
+    // In a comparison, one hint with the latest start.
+    const both: FakeWikimediaOptions = { ...WIKI, views: (project, article, date) => (article !== null && date < (project === 'cs.wikipedia' ? '2025-06-01' : '2025-08-01') ? undefined : WIKI.views(project, article, date)) };
+    const cmp = ok(await run(['analyze', '--topic', 'Intermittent fasting', '--languages', 'cs,uk'], deps({}, both)));
+    expect(cmp.warnings).toContain('Data start later than 2024-09-25 for cs on 2025-06-01, uk on 2025-08-01 (the article may have been created or renamed then). For a fair picture, re-run with --start 2025-08-01.');
   });
 });
 

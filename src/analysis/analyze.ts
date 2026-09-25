@@ -85,7 +85,8 @@ export interface SeriesAnalysis {
     totalViews: number;
     dailyMean: number;
     dailyMedian: number;
-    peakDay: { date: string; views: number };
+    /** null when no views were reported in the period. */
+    peakDay: { date: string; views: number } | null;
   };
   normalization: Normalization | null;
   monthly: MonthlyRow[];
@@ -153,7 +154,7 @@ export function analyzeSeries(series: PageviewSeries, options: AnalysisOptions =
       totalViews,
       dailyMean: mean(views),
       dailyMedian: median(views),
-      peakDay: { date: peak.date, views: peak.views },
+      peakDay: totalViews > 0 ? { date: peak.date, views: peak.views } : null,
     },
     normalization: edition && editionTotal > 0 ? { editionTotalViews: editionTotal, viewsPerMillion: (totalViews / editionTotal) * 1e6 } : null,
     monthly,
