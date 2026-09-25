@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–11 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report, CLI, SKILL.md, end-to-end scenarios) are complete. See [evaluation/end-to-end.md](evaluation/end-to-end.md) for recorded agent runs of the assignment scenarios. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–12 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report, CLI, SKILL.md, end-to-end scenarios, cheap-model evaluation) are complete. See [evaluation/end-to-end.md](evaluation/end-to-end.md) for recorded agent runs of the assignment scenarios and [evaluation/haiku-4.5.md](evaluation/haiku-4.5.md) for the Claude Haiku 4.5 evaluation. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Using it as an Agent Skill
@@ -23,10 +23,20 @@ calls and how to report the results; [references/output-fields.md](references/ou
 describes the JSON fields. Compiled files are not committed, so build once after cloning
 (`npm ci && npm run build`); SKILL.md also tells the agent to do this when `dist/cli.js` is missing.
 
-For Claude Code, the folder must sit in a skills directory under its own name, e.g.
+For Claude Code, the folder must sit in a skills directory, e.g.
 `~/.claude/skills/wikipedia-interest-skill/` (all projects) or
-`<project>/.claude/skills/wikipedia-interest-skill/` (one project). Clone it there, or link it
-(Windows: `mklink /J "%USERPROFILE%\.claude\skills\wikipedia-interest-skill" <repo path>`).
+`<project>/.claude/skills/wikipedia-interest-skill/` (one project). The folder name becomes the
+skill's command name (`/wikipedia-interest-skill`). Clone the repository there, or link it; Claude
+Code follows symlinks and Windows junctions:
+
+```powershell
+New-Item -ItemType Junction -Path "$env:USERPROFILE\.claude\skills\wikipedia-interest-skill" -Target "<repo path>"
+```
+
+SKILL.md tells the agent to run the CLI by its full path, `node "${CLAUDE_SKILL_DIR}/dist/cli.js"`,
+because Claude Code runs shell commands in the session's working folder (and `cd … &&` fails in
+PowerShell). The CLI finds `.env`, the cache and `output/` relative to its own real location,
+also when it is started through a junction or symlink.
 
 ## Architecture (summary)
 

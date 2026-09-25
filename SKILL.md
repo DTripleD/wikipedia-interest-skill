@@ -13,11 +13,29 @@ one command, and explain the JSON it prints. **Never compute, estimate or invent
 Wikipedia pageviews measure **attention and information-seeking**, not market demand,
 purchase intent or willingness to pay. Every answer must say so.
 
-## 0. Setup (once per machine)
+## Hard rules
 
-Run every command from this skill's folder (the folder that contains this SKILL.md).
+1. **No numbers of your own.** Never write "X times", "N % more/less", sums or averages. To
+   compare editions, quote `relativeToLeaderPct`: "pl is at 65.1 % of the cs level".
+2. **Copy the confidence exactly:** `confidence.level` and every one of its `reasons`. Never
+   upgrade it ("very high"). If a reason says the ranking is not stable, say the editions are
+   roughly equal and do not name a winner.
+3. **Views per million** means views per million pageviews of that Wikipedia edition. It is
+   never per million people, residents or per capita.
+4. **Do only what was asked.** Make a PDF (`report`) only when the user asks for a report, PDF
+   or something to share. Never replace the topic with another or broader article (e.g.
+   `English language` for "learning English") without asking the user first.
+5. **Editions, not countries:** "Turkish Wikipedia", never "Turkey", and no flags.
 
-1. If `dist/cli.js` does not exist: `npm ci` then `npm run build`.
+## 0. Setup
+
+Always run the CLI by its full path, from any folder and in any shell:
+`node "${CLAUDE_SKILL_DIR}/dist/cli.js" <command> ...` (Claude Code fills in
+`${CLAUDE_SKILL_DIR}`; in other agents, use the folder that contains this SKILL.md). Do not use
+`cd ... &&`: it fails in PowerShell.
+
+1. Only if `dist/cli.js` does not exist in that folder, run `npm ci` and then `npm run build`
+   there. Never run npm otherwise.
 2. If `.env` does not exist, tell the user once: copy `.env.example` to `.env` and put a real
    email in `WIKI_SKILL_CONTACT` (Wikimedia rate-limits clients without a contact). You can
    continue without it.
@@ -28,7 +46,7 @@ Extract five things:
 
 | Item | How |
 | --- | --- |
-| **Topic** | The English Wikipedia article title for the concept, e.g. "interval fasting" → `Intermittent fasting`, "астрономія" → `Astronomy`. Use the specific concept, not the user's phrase ("interest in learning English" → the concept of learning English as a foreign language). If you do not know the English title, use the user's own word and add `--source <language of that word>`, e.g. `--topic "Астрономія" --source uk`. Never run a non-English word with the default English source. |
+| **Topic** | The English Wikipedia article title for the concept, e.g. "interval fasting" → `Intermittent fasting`, "астрономія" → `Astronomy`. Use the specific concept, not the user's phrase ("interest in learning English" → `English as a second or foreign language`). If you do not know the English title, use the user's own word and add `--source <language of that word>`, e.g. `--topic "Астрономія" --source uk`. Never run a non-English word with the default English source. |
 | **Languages** | Wikipedia edition codes, comma-separated: `pl` Polish, `cs` Czech, `uk` Ukrainian, `de`, `fr`, `es`, `pt`, `it`, `ro`, `hu`, `tr`, `ru`, `ja`, `ko`, `zh`, `ar`, `hi`, `en` … (max 20). A language edition is an audience of readers of that language, not a country (`es` covers Spain and Latin America; `en` is global). The language the user writes in is **not** a language to analyze. |
 | **Period** | Default: last 24 months (no flag). "last year" → `--months 12`; "last 3 years" → `--months 36`; exact dates → `--start YYYY-MM-DD --end YYYY-MM-DD`. |
 | **Report?** | Use `report` only if the user asks for a report, PDF, something shareable or to send. Otherwise `analyze`. |
@@ -46,15 +64,15 @@ pageviews only show attention on Wikipedia.
 ## 2. Run the CLI
 
 ```
-node dist/cli.js resolve --topic "<Title>" --languages <codes>      # which article per language (no pageviews)
-node dist/cli.js analyze --topic "<Title>" --languages <codes>      # metrics + confidence + findings
-node dist/cli.js report  --topic "<Title>" --languages <codes> [--note "..."]   # same + one-page PDF
+node "${CLAUDE_SKILL_DIR}/dist/cli.js" resolve --topic "<Title>" --languages <codes>   # article per language
+node "${CLAUDE_SKILL_DIR}/dist/cli.js" analyze --topic "<Title>" --languages <codes>   # metrics, confidence, findings
+node "${CLAUDE_SKILL_DIR}/dist/cli.js" report  --topic "<Title>" --languages <codes>   # same + one-page PDF [--note "..."]
 ```
 
 Options for all commands: `--source <code>` (language of `--topic`, default `en`),
 `--title <code>=<Title>` (use this article for that language; repeatable), `--no-cache`.
 `analyze` and `report` also take `--months N` or `--start`, `--end`, `--charts`, `--out <dir>`.
-`report` takes `--note "<text>"` (see step 5). `node dist/cli.js help` lists everything.
+`report` takes `--note "<text>"` (see step 5). The `help` command lists everything.
 
 Rules:
 - Put **all** languages in one call. Never loop over languages.
@@ -81,7 +99,7 @@ Retry at most once per problem. Never loop.
 suggest an article title you believe exists (e.g. a broader article). Verify it first:
 
 ```
-node dist/cli.js resolve --topic "<same topic>" --languages pl --title "pl=<Title>"
+node "${CLAUDE_SKILL_DIR}/dist/cli.js" resolve --topic "<same topic>" --languages pl --title "pl=<Title>"
 ```
 
 Show the user what it matched (`article`, `confidence`, `notes`). Use it only after the user
@@ -93,7 +111,7 @@ or broader article, so its numbers are not directly comparable.
 Use only these fields (full list: [references/output-fields.md](references/output-fields.md)):
 
 - `period` — the analyzed dates. Always state them.
-- `rankedBy` — `views_per_million` means languages are compared relative to edition size. Use this ranking (`comparison.ranking`, `relativeToLeaderPct`) to compare languages. `totalViews` mostly reflects how big an edition is.
+- `rankedBy` — `views_per_million` means languages are compared relative to edition size (views per million pageviews of that edition; not per person). Use this ranking (`comparison.ranking`, `relativeToLeaderPct`) to compare languages. `totalViews` mostly reflects how big an edition is.
 - Per language (`languages[]`): `article`, `totalViews`, `dailyMedian`, `viewsPerMillion`, `yoyChangePct`, `yoyChangeExcludingSpikesPct`, `recent90ChangePct`, `trend`, `levelShift`, `seasonality`, `spikes`, `resolution`, `confidence`.
 - `trend.direction`: `increasing` / `decreasing` are statistically significant. `no_significant_trend` means no clear direction; it is not proof that interest is stable.
 - `levelShift` not null: interest jumped or dropped once between the two months in `between`. If `editionChangePct` is set, the whole edition changed at the same time, so part of the change is not about the topic.
@@ -111,8 +129,8 @@ Reply in the user's language. Name editions, not countries ("Czech Wikipedia", n
 or "in Poland"). Keep it short:
 
 1. **Answer** in one or two sentences (e.g. which edition shows more interest relative to its size, and whether interest is rising or falling).
-2. **Key numbers**, copied from the JSON: per language `viewsPerMillion`, `totalViews`, `yoyChangePct`, trend direction and `perYearPct`. A small table is fine.
-3. **Confidence**: `confidence.level` with its reasons in plain words. For trends and changes, give the per-claim level too.
+2. **Key numbers**, copied from the JSON: per language `viewsPerMillion`, `totalViews`, `yoyChangePct`, trend direction and `perYearPct`. A small table is fine. For the gap between editions use only `relativeToLeaderPct` ("es is at 39.4 % of the uk level").
+3. **Confidence** (always, even in a short answer): `confidence.level` with all its reasons in plain words. For trends and changes, give the per-claim level too.
 4. **Missing editions** and their reasons, if any.
 5. **Limitation**: pageviews show attention on Wikipedia, not market demand or willingness to pay (from `limitations[0]`). Add other limitations only if relevant.
 6. **Next step** (for "what to research next" questions): which editions or topics look worth validating next and why, based only on the numbers and confidence above; suggest validating with real demand data (search volume, surveys, app-store data, pilot sales).
@@ -123,7 +141,7 @@ the AI agent, not computed". Write it after you have seen the numbers (run `anal
 re-run `report` with the note): max 600 characters, English, interpretation only, no numbers
 that are not in the JSON.
 
-**Before sending, check:** every number is in the JSON; the period is stated; the confidence
+**Before sending, check:** every number is in the JSON (no ratios or "% more" of your own); the period is stated; the confidence
 level and reasons are stated; missing editions are mentioned; the attention-not-demand
 limitation is stated.
 

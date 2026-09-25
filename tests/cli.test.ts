@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { run, type CliResult } from '../src/cli.js';
+import { isEntryPoint, run, type CliResult } from '../src/cli.js';
 import { parseAnalysisArgs } from '../src/commands/args.js';
 import { baseName } from '../src/commands/commands.js';
 import type { CliDeps } from '../src/commands/pipeline.js';
@@ -81,6 +82,22 @@ describe('cli: envelope and arguments', () => {
     expect(baseName({ topic: 'Intermittent fasting!', languages: ['uk', 'cs'], start: '2024-09-25', end: '2026-09-24' })).toBe('intermittent-fasting_cs-uk_2024-09-25_2026-09-24');
     expect(baseName({ topic: 'Астрономія', languages: ['uk'], start: 'a', end: 'b' })).toBe('астрономія_uk_a_b');
     expect(baseName({ topic: '???', languages: ['uk'], start: 'a', end: 'b' })).toBe('topic_uk_a_b');
+  });
+});
+
+describe('cli: entry point', () => {
+  it('recognizes the script when it is started through a junction or symlink', () => {
+    const real = join(outDir, 'real-skill');
+    mkdirSync(real, { recursive: true });
+    const script = join(real, 'cli.js');
+    writeFileSync(script, '');
+    const link = join(outDir, 'linked-skill');
+    symlinkSync(real, link, 'junction'); // a junction needs no admin rights on Windows; 'junction' is ignored elsewhere
+    const moduleUrl = pathToFileURL(script).href;
+    expect(isEntryPoint(script, moduleUrl)).toBe(true);
+    expect(isEntryPoint(join(link, 'cli.js'), moduleUrl)).toBe(true);
+    expect(isEntryPoint(join(real, 'other.js'), moduleUrl)).toBe(false); // missing file
+    expect(isEntryPoint(undefined, moduleUrl)).toBe(false);
   });
 });
 

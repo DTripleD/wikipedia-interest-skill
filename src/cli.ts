@@ -9,7 +9,8 @@
  *
  * Commands: version, resolve, analyze, report. Run `help` for the options.
  */
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { CliError } from './commands/args.js';
 import { analyzeCommand, reportCommand, resolveCommand } from './commands/commands.js';
 import type { CliDeps } from './commands/pipeline.js';
@@ -75,6 +76,20 @@ async function main(): Promise<void> {
   process.exitCode = result.ok ? 0 : 1;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/**
+ * True when `scriptPath` (process.argv[1]) is this module. Both sides are resolved to real paths:
+ * Node gives import.meta.url as the real path, while argv[1] keeps a symlink or junction (e.g. a
+ * skill folder linked into ~/.claude/skills, or an npm bin link), which otherwise never matches.
+ */
+export function isEntryPoint(scriptPath: string | undefined, moduleUrl: string): boolean {
+  if (!scriptPath) return false;
+  try {
+    return realpathSync(scriptPath) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint(process.argv[1], import.meta.url)) {
   void main();
 }

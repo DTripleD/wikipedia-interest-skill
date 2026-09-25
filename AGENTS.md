@@ -33,11 +33,11 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 9  | CLI / tool interface                    | ✅ done     |
 | 10 | SKILL.md                                | ✅ done     |
 | 11 | End-to-end scenarios                    | ✅ done     |
-| 12 | Cheap-model evaluation (Haiku 4.5)      | ⏭ next      |
-| 13 | Edge cases and robustness               | pending     |
+| 12 | Cheap-model evaluation (Haiku 4.5)      | ✅ done     |
+| 13 | Edge cases and robustness               | ⏭ next      |
 | 14 | Final cleanup                           | pending     |
 
-**Current stage:** Stage 11 is complete and awaiting review/commit. Stage 12 (cheap-model evaluation) comes next.
+**Current stage:** Stage 12 is complete and awaiting review/commit (three Haiku runs evaluated in `evaluation/haiku-4.5.md`). Stage 13 (edge cases and robustness) comes next; it starts with the two SKILL.md items carried over from Stage 12 and the per-million rounding in the report (Stage 11).
 
 ## Decisions made (with the user)
 
@@ -287,7 +287,22 @@ Decisions (agreed with the user): each scenario is run by a **fresh subagent** t
 
 ## Planned design (not yet implemented; revisit in each stage)
 
-- **Stage 12:** the user runs the scenarios in Claude Code with Haiku 4.5. Provide `evaluation/`: scenario prompts with the scripted replies used in Stage 11, a checklist (instruction following, tool/flag choice, ambiguity handling, no invented numbers, interpretation, token use, failure handling incl. a forced error), and a results template. The Stage 11 transcripts are the reference answers. The number-check script (extract numbers from the answer, look them up in the saved JSON) could become an evaluation helper.
+### Cheap-model evaluation (Stage 12) — `evaluation/haiku-4.5-runbook.md`, `evaluation/haiku-4.5.md`, `evaluation/scripts/`
+
+Decisions (agreed with the user): 3 assignment scenarios + 3 robustness scenarios (ambiguous `Mercury`; follow-up "5 years + PDF" on `Chess` de/fr; nonexistent edition `tlh` with `Yoga` uk/pl); the user runs them, the agent evaluates; raw exports stay in the gitignored `output/haiku-runs/`.
+
+- **Verified Claude Code facts (docs, 2026-09-25, code.claude.com/docs/en/skills.md, commands.md, sessions.md):** skills live in `~/.claude/skills/<name>/` or `.claude/skills/<name>/`; the folder name is the command name; symlinks/junctions are followed; changes are picked up live, but a skills directory created after the session started needs a restart; `${CLAUDE_SKILL_DIR}` is substituted in SKILL.md; Bash runs in the session's working directory (not the skill folder); `/model haiku`, `/cost`, `/export [file]`.
+- **SKILL.md change:** step 0 now says to prefix commands with `cd "${CLAUDE_SKILL_DIR}" && ` (other agents: the folder containing SKILL.md).
+- **Runbook:** setup (build, junction into `~/.claude/skills`, empty working folder `C:\haiku-eval` so Haiku cannot see the source, `/model haiku`), per-scenario procedure (`/clear`, paste the prompt, scripted replies only, no hints, `/cost` + `/export`), six scenarios with expected behavior, a 14-point checklist.
+- **Robustness scenarios probed live (2026-09-25):** `Mercury` → `TOPIC_AMBIGUOUS` (planet, element, Freddie Mercury, …); `Mercury (planet)` → pl `Merkury`, cs `Merkur (planeta)`; `Chess` → de `Schach`, fr `Échecs`, 60 months → low (de ahead in 41 of 59 months); `Yoga` uk/pl/tlh → tlh `language_unavailable` ("edition does not exist"), uk vs pl low (15 of 23 months).
+- **First Haiku run evaluated (2026-09-25):** results in `evaluation/haiku-4.5.md` (source: the session logs `~/.claude/projects/c--haiku-eval/*.jsonl`, which hold prompts, tool calls, CLI output and per-request tokens; `/cost` is not available in the user's Claude Code, so tokens come from the logs). Skill picked automatically 6/6, ambiguity and tlh handled, caveat + confidence level always present, ≈ $0.04–0.08 per scenario ($0.33 total). Failures: own ratios in 3/6 answers ("3.5 times", "55 % higher", a wrong "34.9 % higher"); "per million" read as per residents/per capita; the unstable-ranking reason dropped in 2 comparisons; unrequested PDF; unasked switch to `English language`; PowerShell `&&` errors in 4/6; `npm ci` on every run. Follow-up turns of scenarios 1 and 5 were not sent.
+- **Bug fixed in Stage 12:** `src/cli.ts` compared `import.meta.url` (real path) with `process.argv[1]` (junction/symlink path), so `node <junction>/dist/cli.js` exited 0 with no output. Now `isEntryPoint()` compares realpaths; unit test with a real junction in `tests/cli.test.ts`.
+- **Second Haiku run (same SKILL.md, bug fixed; scenarios 1, 3, 4, 5):** 1 and 4 better (per million read correctly; ranking reason passed on), 5 follow-up correct (`report --months 60`), but own ratios, the unasked `English language` switch, a missing confidence section (3), unrequested PDFs and PowerShell `&&` repeated → treated as instruction problems.
+- **SKILL.md changes applied after run 2:** Hard rules block (no own numbers, quote `relativeToLeaderPct`; copy confidence level + all reasons, unstable = roughly equal; per million = per million edition pageviews; `report` only on request; no topic switch without asking; editions not countries/flags); CLI invoked as `node "${CLAUDE_SKILL_DIR}/dist/cli.js"` (no `cd &&`); npm only if `dist/cli.js` is missing; exact ESL title in the topic example; confidence required in every answer. `tests/skill.test.ts` command regex updated. ≈ 3 100 tokens.
+- **Run 3 (new session, new SKILL.md; scenarios 1, 2, 3, 5):** no own numbers, no per-person reading, confidence + reasons always passed on, right ESL article without a switch, no PowerShell errors (full-path invocation), no `npm ci`; $0.03–0.05 per scenario. Left: an unrequested PDF in scenario 2 (Haiku sets `report: true` in the Skill args before reading SKILL.md) and no caveat in that answer; no PDF in scenario 3 despite "short report". The optional comparison sentence in `findings` is **not needed** (own ratios disappeared without it).
+- **Carried to Stage 13:** make the PDF trigger explicit in SKILL.md and in the frontmatter `description` ("report/звіт/PDF/to share" → `report`; trend or trust questions → `analyze`); add the attention-not-demand sentence to the Hard rules.
+- **Evaluation helpers committed:** `evaluation/scripts/parse-session.mjs` (session log → timeline + usage) and `evaluation/scripts/check-session.mjs` (numbers in answers vs CLI output; coarse filter, hits reviewed by hand).
+- Scratchpad helpers (not in the repo): `parse-session.mjs` (log → readable timeline + usage) and `check-session.mjs` (numbers in answers vs CLI output). Worth moving into `evaluation/` if the second run happens.
 - Generated artifacts go to `output/` (gitignored).
 
 ## Current layout
@@ -340,6 +355,9 @@ tests/integration/*.live.test.ts  live API tests (npm run test:integration); sce
 tests/integration/setup.ts     loads .env for live tests
 .env.example                   template for .env (WIKI_SKILL_CONTACT)
 evaluation/end-to-end.md       Stage 11: method, check table, findings and transcripts of the three scenario runs
+evaluation/haiku-4.5-runbook.md  Stage 12: how to run the six scenarios with Haiku 4.5 in Claude Code, expected behavior, checklist
+evaluation/haiku-4.5.md        Stage 12: results of three Haiku runs, bug found, cost, SKILL.md changes, remaining issues
+evaluation/scripts/*.mjs       session-log timeline (parse-session) and number check (check-session) used for the evaluation
 tsconfig.json                  strict type-check config (src + tests + configs), noEmit
 tsconfig.build.json            build config (src → dist)
 vitest.config.ts               unit tests; excludes tests/integration
@@ -350,7 +368,7 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 
 - CLI: requests are sequential (per language: article series + edition totals); 20 languages without cache take ~40+ requests. Edition totals are always fetched (normalization); a failure there fails the command.
 - CLI: `analyze`/`report` re-run the resolver each time (cached for 7 days). There is no separate fetch/chart command; SVGs come from `--charts`.
-- SKILL.md: not yet exercised by a real agent (Stages 11–12). The drift test checks names, not whether a cheap model follows the instructions. Installing the skill for Claude Code means placing this folder under a skills directory (see README).
+- SKILL.md: exercised by Opus subagents (Stage 11) and three Haiku 4.5 runs (Stage 12). Haiku still decides on `report` vs `analyze` partly before reading SKILL.md (see evaluation/haiku-4.5.md). The drift test checks names, not behavior. Installing the skill for Claude Code means placing this folder under a skills directory (see README).
 - The analyst note (`--note`) must be English (the report is English); the agent's chat answer is in the user's language.
 - The Mann–Kendall test assumes independent observations. Monthly averages are still autocorrelated, so p-values are somewhat optimistic. Weekly-basis trends (short periods) are the most affected.
 - The trend is monotonic/linear only. Level shifts and seasonality are *flagged* (Stage 6), not modelled: the trend is still one Theil–Sen line.
@@ -382,4 +400,4 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 
 ## Remaining work
 
-Stages 12–14 (see the table above).
+Stages 13–14 (see the table above).

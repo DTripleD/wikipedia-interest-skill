@@ -64,8 +64,8 @@ describe('SKILL.md', () => {
   });
 
   it('names only real commands', async () => {
-    const commands = matches(/node dist\/cli\.js ([a-z]+)/g, docs);
-    expect(commands).toEqual(expect.arrayContaining(['resolve', 'analyze', 'report', 'help']));
+    const commands = matches(/dist\/cli\.js"? ([a-z]+)/g, docs);
+    expect(commands).toEqual(expect.arrayContaining(['resolve', 'analyze', 'report']));
     for (const command of commands) {
       const result = await run([command], { env: {}, cache: null, fetch: () => Promise.reject(new Error('no network in tests')) });
       if (!result.ok) expect(result.error.code, command).not.toBe('UNKNOWN_COMMAND');
