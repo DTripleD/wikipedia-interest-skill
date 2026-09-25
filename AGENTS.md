@@ -31,13 +31,13 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 7  | Charts                                  | ✅ done     |
 | 8  | Report generation (one-page PDF)        | ✅ done     |
 | 9  | CLI / tool interface                    | ✅ done     |
-| 10 | SKILL.md                                | ⏭ next      |
-| 11 | End-to-end scenarios                    | pending     |
+| 10 | SKILL.md                                | ✅ done     |
+| 11 | End-to-end scenarios                    | ⏭ next      |
 | 12 | Cheap-model evaluation (Haiku 4.5)      | pending     |
 | 13 | Edge cases and robustness               | pending     |
 | 14 | Final cleanup                           | pending     |
 
-**Current stage:** Stage 9 is complete and awaiting review/commit. Stage 10 (SKILL.md) comes next.
+**Current stage:** Stage 10 is complete and awaiting review/commit. Stage 11 (end-to-end scenarios) comes next.
 
 ## Decisions made (with the user)
 
@@ -256,9 +256,24 @@ Decisions (agreed with the user): three charts (timeline, language comparison, y
 - **Fonts (changed in Stage 8):** chart text is measured with the real embedded Noto Sans (`src/fonts.ts`, fontkit), not Helvetica estimates; the SVG font family is `Noto Sans, Helvetica, Arial, sans-serif`. Noto Sans has no `≈ → ▲`, so labels say "Step: a to b/day", "triangles mark …" and "from about a to b". Tests assert that chart specs and confidence texts only use characters the font can draw (`missingGlyphs`).
 - **Visual check (2026-09-25):** real cs/uk data were rendered and inspected as PNG (converted with `@resvg/resvg-js` in the scratchpad only; not a project dependency).
 
+### SKILL.md (Stage 10) — `SKILL.md`, `references/output-fields.md`
+
+Decisions (agreed with the user):
+- **Languages** = Wikipedia language editions, i.e. reader audiences, not countries. The assignment says the user selects them ("у вибраних нами мовних розділах"), so when none are named the agent **asks** and does not pick a set itself.
+- **PDF only on request** (report / PDF / shareable / to send); otherwise `analyze`, charts via `--charts` when asked.
+- **Alternative titles:** when an edition is missing, the agent may propose a title from its own knowledge, but must verify it with `resolve --title <lang>=<Title>`, show the match (it will be `medium`), and use it only after the user agrees.
+- **Resolver note wording:** `present.ts` `cliNotes()` rewrites the library's "re-run with titles.<lang> set to it" to "re-run with --title <lang>=<title>" in CLI output (resolve and analyze). The library text is unchanged.
+
+Content (≈ 10.7 KB, ~2 700 tokens, 144 lines; the Agent Skills spec recommends < 5 000 tokens / 500 lines):
+- Frontmatter per agentskills.io/specification (verified 2026-09-25): `name` = folder name `wikipedia-interest-skill`, `description` (what + when), `license`, `compatibility` (Node ≥ 22.12, network).
+- Sections: 0 setup (`npm ci && npm run build` if `dist/cli.js` is missing; `.env` contact), 1 read the request (topic → English title or `--source`; languages; period default 24 months, never asked; report?; charts?; when to ask), 2 commands and rules (all languages in one call; `resolve` only when unsure), 3 error table (retry at most once; never pick candidates) + missing-editions workflow, 4 which fields to read, 5 answer template + pre-send checklist + `--note` rules, "Never" list, follow-ups.
+- `references/output-fields.md`: full field glossary and error codes, loaded on demand (one level deep, as the spec recommends).
+- **`tests/skill.test.ts`** (drift test): frontmatter validity and limits, size budget, links exist, every `node dist/cli.js <cmd>` is a real command, every `--flag` is in `REPORT_OPTIONS` (now exported from `args.ts`), every backticked error code exists as a literal in `src/`, every camelCase field exists in the CLI output code, every snake_case value exists in `src/`, and the attention-≠-demand caveat is present. It caught two placeholder "fields" in the first draft of the reference.
+- Live check (2026-09-25): `resolve --topic "Intermittent fasting" --languages pl` notes now say `--title pl=<title>`; `--title "pl=Głodówka lecznicza"` → resolved, `medium`, Wikidata mismatch note (the workflow in SKILL.md §3).
+
 ## Planned design (not yet implemented; revisit in each stage)
 
-- **SKILL.md (Stage 10):** the agent must detect the language the user wrote the topic in and pass `--source <lang>` (or translate the topic to its English Wikipedia title); never run a non-English topic against the default `en` source. The workflow is resolve (only when unsure) → analyze → report. Map resolver notes that say `titles.<lang>` to the CLI flag `--title <lang>=<Title>`. On `TOPIC_AMBIGUOUS` / `TOPIC_NOT_FOUND`, show the candidates and ask the user; never pick one. Quote numbers from the JSON; never compute. Always pass on `limitations[0]` (attention ≠ demand) and the confidence level with reasons.
+- **Stage 11:** run the three assignment scenarios end to end by following SKILL.md literally; store example outputs in `examples/`. Scenario 3 ("learning English"): the agent must ask for the editions and the meaning (disambiguation) — `English as a second or foreign language` has no pl/uk/no article (see Stage 3 findings), so expect the missing-editions workflow.
 - Generated artifacts go to `output/` (gitignored).
 
 ## Current layout
@@ -295,7 +310,9 @@ src/reports/content.ts         report model: table rows, templated findings, con
 src/reports/pdf.ts             one-page A4 layout with PDFKit + svg-to-pdfkit; generateReport
 assets/fonts/                  NotoSans-Regular.ttf, NotoSans-Bold.ttf (unhinted, v2.015) + OFL.txt
 docs/wikimedia-api.md          verified Wikimedia API behavior + sources
-tests/*.test.ts                config, CLI (fake Wikimedia), date helper, font tests
+SKILL.md                       Agent Skill instructions for the agent (workflow, commands, errors, answer rules)
+references/output-fields.md    CLI JSON field glossary and error codes (loaded on demand)
+tests/*.test.ts                config, CLI (fake Wikimedia), date helper, font tests, SKILL.md consistency (skill.test.ts)
 tests/helpers/fake-wikimedia.ts  URL-routed fake of the Action API and Pageviews API for CLI tests
 tests/wikipedia/*.test.ts      http, languages, api, resolver unit tests (scripted fetch, no network)
 tests/data/*.test.ts           series, cache, getDailySeries unit tests (fake API, MemoryCache)
@@ -319,7 +336,8 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 
 - CLI: requests are sequential (per language: article series + edition totals); 20 languages without cache take ~40+ requests. Edition totals are always fetched (normalization); a failure there fails the command.
 - CLI: `analyze`/`report` re-run the resolver each time (cached for 7 days). There is no separate fetch/chart command; SVGs come from `--charts`.
-- CLI: the resolver's notes mention `titles.<lang>`; the matching CLI flag is `--title <lang>=<Title>` (SKILL.md must say so).
+- SKILL.md: not yet exercised by a real agent (Stages 11–12). The drift test checks names, not whether a cheap model follows the instructions. Installing the skill for Claude Code means placing this folder under a skills directory (see README).
+- The analyst note (`--note`) must be English (the report is English); the agent's chat answer is in the user's language.
 - The Mann–Kendall test assumes independent observations. Monthly averages are still autocorrelated, so p-values are somewhat optimistic. Weekly-basis trends (short periods) are the most affected.
 - The trend is monotonic/linear only. Level shifts and seasonality are *flagged* (Stage 6), not modelled: the trend is still one Theil–Sen line.
 - Confidence thresholds are explicit, documented heuristics (`CONFIDENCE_THRESHOLDS`), not calibrated probabilities. They were checked on the assignment's cs/uk data only.
@@ -350,4 +368,4 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 
 ## Remaining work
 
-Stages 10–14 (see the table above).
+Stages 11–14 (see the table above).

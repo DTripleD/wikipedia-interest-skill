@@ -13,8 +13,20 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–9 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report, CLI) are complete. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–10 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report, CLI, SKILL.md) are complete. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
+
+## Using it as an Agent Skill
+
+This folder is the skill: [SKILL.md](SKILL.md) tells the agent how to turn a request into CLI
+calls and how to report the results; [references/output-fields.md](references/output-fields.md)
+describes the JSON fields. Compiled files are not committed, so build once after cloning
+(`npm ci && npm run build`); SKILL.md also tells the agent to do this when `dist/cli.js` is missing.
+
+For Claude Code, the folder must sit in a skills directory under its own name, e.g.
+`~/.claude/skills/wikipedia-interest-skill/` (all projects) or
+`<project>/.claude/skills/wikipedia-interest-skill/` (one project). Clone it there, or link it
+(Windows: `mklink /J "%USERPROFILE%\.claude\skills\wikipedia-interest-skill" <repo path>`).
 
 ## Architecture (summary)
 

@@ -57,7 +57,8 @@ const ANALYSIS_OPTIONS = {
   out: { type: 'string' },
 } as const;
 
-const REPORT_OPTIONS = { ...ANALYSIS_OPTIONS, note: { type: 'string' } } as const;
+/** All options accepted by the widest command (report); used by the SKILL.md consistency test. */
+export const REPORT_OPTIONS = { ...ANALYSIS_OPTIONS, note: { type: 'string' } } as const;
 
 export function parseResolveArgs(argv: readonly string[]): TopicArgs {
   return topicArgs(parse(argv, TOPIC_OPTIONS));

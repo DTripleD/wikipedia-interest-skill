@@ -19,6 +19,11 @@ export function round(x: number, digits = 1): number {
 
 const pct = (share: number | null): number | null => (share === null ? null : round(share * 100, 1));
 
+/** Resolver notes name the library option `titles.<lang>`; the CLI flag is `--title <lang>=<title>`. */
+export function cliNotes(notes: readonly string[]): string[] {
+  return notes.map((n) => n.replace(/re-run with titles\.([a-z-]+) set to it/g, 're-run with --title $1=<title>'));
+}
+
 export function presentResolve(result: ResolveResult) {
   const { source } = result;
   return {
@@ -27,7 +32,7 @@ export function presentResolve(result: ResolveResult) {
       language: source.language,
       status: source.status,
       article: source.article,
-      ...(source.notes.length ? { notes: source.notes } : {}),
+      ...(source.notes.length ? { notes: cliNotes(source.notes) } : {}),
       ...(source.candidates.length ? { candidates: source.candidates.map((c) => ({ title: c.title, description: c.description })) } : {}),
     },
     languages: result.results.map((r) => ({
@@ -37,7 +42,7 @@ export function presentResolve(result: ResolveResult) {
       confidence: r.confidence,
       method: r.method,
       ...(r.redirectedFrom ? { redirectedFrom: r.redirectedFrom } : {}),
-      ...(r.notes.length ? { notes: r.notes } : {}),
+      ...(r.notes.length ? { notes: cliNotes(r.notes) } : {}),
       ...(r.candidates.length ? { candidates: r.candidates.map((c) => ({ title: c.title, description: c.description })) } : {}),
     })),
   };
@@ -84,7 +89,7 @@ function presentLanguage(label: string, rank: number, a: SeriesAnalysis, member:
     rank,
     language: label,
     article: a.article?.replaceAll('_', ' ') ?? null,
-    resolution: { confidence: resolution.confidence, method: resolution.method, ...(resolution.notes.length ? { notes: resolution.notes } : {}) },
+    resolution: { confidence: resolution.confidence, method: resolution.method, ...(resolution.notes.length ? { notes: cliNotes(resolution.notes) } : {}) },
     totalViews: a.summary.totalViews,
     dailyMean: round(a.summary.dailyMean),
     dailyMedian: round(a.summary.dailyMedian),

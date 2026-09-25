@@ -94,6 +94,10 @@ describe('cli: resolve', () => {
       ['pl', 'not_found', null],
       ['xx', 'language_unavailable', null],
     ]);
+    // Resolver notes name the CLI flag, not the library option titles.<lang>.
+    const plNotes = data.languages[1].notes.join(' ');
+    expect(plNotes).toContain('re-run with --title pl=<title>');
+    expect(plNotes).not.toContain('titles.');
     expect(data.apiRequests).toBe(d.calls.length);
     expect(data.warnings[0]).toMatch(/WIKI_SKILL_CONTACT is not set/);
     expect(data.cache).toBe('off');
