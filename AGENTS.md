@@ -32,12 +32,12 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 8  | Report generation (one-page PDF)        | ✅ done     |
 | 9  | CLI / tool interface                    | ✅ done     |
 | 10 | SKILL.md                                | ✅ done     |
-| 11 | End-to-end scenarios                    | ⏭ next      |
-| 12 | Cheap-model evaluation (Haiku 4.5)      | pending     |
+| 11 | End-to-end scenarios                    | ✅ done     |
+| 12 | Cheap-model evaluation (Haiku 4.5)      | ⏭ next      |
 | 13 | Edge cases and robustness               | pending     |
 | 14 | Final cleanup                           | pending     |
 
-**Current stage:** Stage 10 is complete and awaiting review/commit. Stage 11 (end-to-end scenarios) comes next.
+**Current stage:** Stage 11 is complete and awaiting review/commit. Stage 12 (cheap-model evaluation) comes next.
 
 ## Decisions made (with the user)
 
@@ -271,9 +271,23 @@ Content (≈ 10.7 KB, ~2 700 tokens, 144 lines; the Agent Skills spec recommends
 - **`tests/skill.test.ts`** (drift test): frontmatter validity and limits, size budget, links exist, every `node dist/cli.js <cmd>` is a real command, every `--flag` is in `REPORT_OPTIONS` (now exported from `args.ts`), every backticked error code exists as a literal in `src/`, every camelCase field exists in the CLI output code, every snake_case value exists in `src/`, and the attention-≠-demand caveat is present. It caught two placeholder "fields" in the first draft of the reference.
 - Live check (2026-09-25): `resolve --topic "Intermittent fasting" --languages pl` notes now say `--title pl=<title>`; `--title "pl=Głodówka lecznicza"` → resolved, `medium`, Wikidata mismatch note (the workflow in SKILL.md §3).
 
+### End-to-end scenarios (Stage 11) — `evaluation/end-to-end.md`, `tests/integration/scenarios.live.test.ts`
+
+Decisions (agreed with the user): each scenario is run by a **fresh subagent** that sees only SKILL.md and the user message (the assignment's Ukrainian wording); the main session plays the founder with scripted replies — scenario 3 editions `de, es, tr, pl, uk`; scenario 1 accepts the broader pl article, scenario 3 declines alternatives. **Where results live (changed at the user's request):** no `examples/` folder. The write-up (method, check table, findings, full transcripts) is `evaluation/end-to-end.md`; raw CLI JSON and the PDF are not committed (they were kept locally in the gitignored `output/stage11-e2e/`). Generated files always go to `output/`.
+
+- **Results (2026-09-25, default period 2024-09-25..2026-09-24):** see [evaluation/end-to-end.md](evaluation/end-to-end.md) for the check table and transcripts.
+  - 1: `analyze pl,cs` → cs only; the agent offered a broader pl article, verified `Głodówka lecznicza` with `resolve --title` (medium, QID Q352490 ≠ Q1666254), asked, then re-ran `analyze --title`. cs 4.4 vs pl 1.23 per million (pl 28 % of cs), both decreasing, medium.
+  - 2: one `analyze` call; decreasing, mid-2025 step partly edition-wide (−33.2 %), medium, per-claim levels given.
+  - 3: the agent asked for the editions (no numbers before that), mapped "learning English" directly to `English as a second or foreign language` (so no disambiguation), ran `analyze` then `report --note`. tr 0.78 > es 0.28 > de 0.12 per million, stable in 23/23 months, low confidence (2–5 views/day); pl, uk missing.
+  - Every number in the three answers was found in the saved JSON (scratchpad script; only reformatted dates and list numbers differed). The attention ≠ demand caveat and the confidence level were in every answer.
+- **Found and fixed:** the scenario 1 agent wrote "Czechia is ahead" / "growth in Poland" → SKILL.md §5 now says to name editions, not countries.
+- **Found, not fixed (Stage 13):** the report table and findings round views per million to 1 decimal (`0.12` → `0.1`), which hides differences between small articles; the CLI JSON has 2 decimals.
+- **Coverage fact:** of 20 editions checked, `English as a second or foreign language` (Q130192) exists only in de, es, tr, id, ko, zh, ar (not pl, uk, cs, pt, it, fr, ru, ja, ro, hu, vi, hi, th). ko/zh/ar titles would be "?" in the PDF (font coverage).
+- **`scenarios.live.test.ts`:** the same flows through `run()` with the fixed period 2024-09-23..2026-09-22, temp cache and output: cs-only + pl missing (cs 6 716 views), the `--title` comparison (pl medium), uk astronomy step 2025-05/06 with edition change < −20 %, `--source uk` resolution, `learning English` → `TOPIC_AMBIGUOUS` with the ESL candidate, and the de/es/tr/pl/uk report (one-page PDF, pl/uk missing).
+
 ## Planned design (not yet implemented; revisit in each stage)
 
-- **Stage 11:** run the three assignment scenarios end to end by following SKILL.md literally; store example outputs in `examples/`. Scenario 3 ("learning English"): the agent must ask for the editions and the meaning (disambiguation) — `English as a second or foreign language` has no pl/uk/no article (see Stage 3 findings), so expect the missing-editions workflow.
+- **Stage 12:** the user runs the scenarios in Claude Code with Haiku 4.5. Provide `evaluation/`: scenario prompts with the scripted replies used in Stage 11, a checklist (instruction following, tool/flag choice, ambiguity handling, no invented numbers, interpretation, token use, failure handling incl. a forced error), and a results template. The Stage 11 transcripts are the reference answers. The number-check script (extract numbers from the answer, look them up in the saved JSON) could become an evaluation helper.
 - Generated artifacts go to `output/` (gitignored).
 
 ## Current layout
@@ -322,10 +336,10 @@ tests/analysis/*.test.ts       stats, trends, outliers, patterns, confidence, an
 tests/charts/*.test.ts         chart specs (data, encodings, no VL computations, font coverage), rendering
 tests/fonts.test.ts            text widths match PDFKit's, missing-glyph detection, Vega text-width hook
 tests/reports/*.test.ts        report model (ranking, findings, caps, validation, sanitizing), one-page PDF
-tests/integration/*.live.test.ts  live API tests (npm run test:integration)
+tests/integration/*.live.test.ts  live API tests (npm run test:integration); scenarios.live.test.ts = the three assignment flows through the CLI
 tests/integration/setup.ts     loads .env for live tests
 .env.example                   template for .env (WIKI_SKILL_CONTACT)
-examples/, evaluation/         empty (.gitkeep)
+evaluation/end-to-end.md       Stage 11: method, check table, findings and transcripts of the three scenario runs
 tsconfig.json                  strict type-check config (src + tests + configs), noEmit
 tsconfig.build.json            build config (src → dist)
 vitest.config.ts               unit tests; excludes tests/integration
@@ -368,4 +382,4 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 
 ## Remaining work
 
-Stages 11–14 (see the table above).
+Stages 12–14 (see the table above).

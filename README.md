@@ -13,7 +13,7 @@ researching further.
 
 ## Status
 
-Early development. Stages 1–10 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report, CLI, SKILL.md) are complete. See [AGENTS.md](AGENTS.md) for the
+Early development. Stages 1–11 (project setup, Pageviews API client, article resolver, data model and caching, analytics engine, confidence model, charts, PDF report, CLI, SKILL.md, end-to-end scenarios) are complete. See [evaluation/end-to-end.md](evaluation/end-to-end.md) for recorded agent runs of the assignment scenarios. See [AGENTS.md](AGENTS.md) for the
 current state and roadmap.
 
 ## Using it as an Agent Skill
@@ -56,8 +56,7 @@ assets/fonts/     Noto Sans TTF (SIL Open Font License, see OFL.txt)
 docs/             verified external API behavior (docs/wikimedia-api.md)
 tests/            Vitest unit tests (deterministic, no network)
 tests/integration live tests against the real Wikimedia API (opt-in)
-examples/         example requests and outputs
-evaluation/       cheap-model (Haiku 4.5) evaluation materials
+evaluation/       end-to-end scenario runs (end-to-end.md) and cheap-model (Haiku 4.5) evaluation
 ```
 
 ## Confidence model

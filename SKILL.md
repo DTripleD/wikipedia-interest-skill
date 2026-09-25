@@ -107,7 +107,8 @@ Use only these fields (full list: [references/output-fields.md](references/outpu
 
 ## 5. Write the answer
 
-Reply in the user's language. Keep it short:
+Reply in the user's language. Name editions, not countries ("Czech Wikipedia", not "Czechia"
+or "in Poland"). Keep it short:
 
 1. **Answer** in one or two sentences (e.g. which edition shows more interest relative to its size, and whether interest is rising or falling).
 2. **Key numbers**, copied from the JSON: per language `viewsPerMillion`, `totalViews`, `yoyChangePct`, trend direction and `perYearPct`. A small table is fine.
