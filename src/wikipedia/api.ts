@@ -16,13 +16,10 @@
  * - Requests without a User-Agent get 403. Retries and error mapping live in http.ts.
  */
 import { fromApiTimestamp, isIsoDate, toApiDate, todayUtc } from '../dates.js';
-import { WikimediaApiError, readJson, requestWithRetry, type HttpOptions, type WikimediaErrorCode } from './http.js';
+import { WikimediaApiError, readJson, requestWithRetry, type HttpOptions } from './http.js';
 
 export { wikipediaProject } from './languages.js';
 export { parseRetryAfter } from './http.js';
-/** Kept as an alias from Stage 2; all Wikimedia errors share one class. */
-export { WikimediaApiError as PageviewsApiError };
-export type PageviewsErrorCode = WikimediaErrorCode;
 
 export const PAGEVIEWS_API_BASE = 'https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article';
 

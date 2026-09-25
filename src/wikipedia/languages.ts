@@ -31,7 +31,7 @@ const LANGUAGE_CODE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 export function toEdition(language: string): string {
   const code = language.trim().toLowerCase();
   if (!LANGUAGE_CODE.test(code) || code.length > 20) {
-    throw new WikimediaApiError('INVALID_INPUT', `Invalid Wikipedia language code: "${language}".`);
+    throw new WikimediaApiError('INVALID_INPUT', `Invalid Wikipedia language code: "${language}". Use edition codes such as pl, cs, uk or de.`);
   }
   return CODE_TO_EDITION[code] ?? code;
 }

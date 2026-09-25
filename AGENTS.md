@@ -35,9 +35,9 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 | 11 | End-to-end scenarios                    | ✅ done     |
 | 12 | Cheap-model evaluation (Haiku 4.5)      | ✅ done     |
 | 13 | Edge cases and robustness               | ✅ done     |
-| 14 | Final cleanup                           | ⏭ next      |
+| 14 | Final cleanup                           | ✅ done     |
 
-**Current stage:** Stage 13 is complete and awaiting review/commit (`evaluation/edge-cases.md`). Stage 14 (final cleanup) comes next.
+**Current stage:** all 14 stages are complete; Stage 14 is awaiting review/commit. Further work is optional; see README → "Developing the skill further".
 
 ## Decisions made (with the user)
 
@@ -50,9 +50,9 @@ The full assignment and roadmap are in [prompts/master_rules.md](prompts/master_
 - **User-Agent:** `wikipedia-interest-skill/<version> (<contact>)`. The contact comes from `WIKI_SKILL_CONTACT`; the fallback is a neutral placeholder (see `src/config.ts`).
 - **`.env` support (added before Stage 4):** `loadDotEnv()` in `src/config.ts` wraps Node's native `process.loadEnvFile` (no dotenv). It always reads the project-root `.env` (resolved from `import.meta.url`, independent of cwd). Shell variables win over the file, and a missing file is ignored. It is called only in the CLI `main()` (so `run()` stays pure) and in `tests/integration/setup.ts`. Unit tests never load it. `.env.example` is committed; `.env` is gitignored.
 - **CLI contract:** every command prints exactly one JSON envelope (one line) to stdout. On success: `{ok:true, command, data}`. On failure: `{ok:false, command, error:{code, message, details?}}` (`details` added in Stage 9, e.g. candidate titles). Exit code is 0 or 1. Outputs stay compact (metrics and file paths, never raw series) so a cheap model can use them.
-- **Stage 12 evaluation** will be run **manually by the user in Claude Code with Haiku 4.5**. The project supplies scenarios, a checklist and a results template.
+- **Stage 12 evaluation** was run **manually by the user in Claude Code with Haiku 4.5** (three runs). The project supplied the runbook, and the agent evaluated the session logs (`evaluation/haiku-4.5.md`).
 - **Documentation language:** English.
-- **Shared HTTP layer (approved in Stage 3):** retry, timeout, `Retry-After`, User-Agent and error mapping live in `src/wikipedia/http.ts` and are used by both the Pageviews client and the resolver. `PageviewsApiError` remains as an alias of `WikimediaApiError`.
+- **Shared HTTP layer (approved in Stage 3):** retry, timeout, `Retry-After`, User-Agent and error mapping live in `src/wikipedia/http.ts` and are used by both the Pageviews client and the resolver. (The Stage 2 alias `PageviewsApiError` was removed in Stage 14; use `WikimediaApiError`.)
 
 ## Implemented
 
@@ -76,7 +76,7 @@ All Wikimedia API assumptions are recorded, with their sources, in
 
 ### Pageviews API client (Stage 2) — `src/wikipedia/api.ts`
 
-- `fetchPageviews(query, options)`, `normalizeArticleTitle`, `buildPageviewsUrl`. It also re-exports `wikipediaProject`, `parseRetryAfter` and `PageviewsApiError`.
+- `fetchPageviews(query, options)`, `normalizeArticleTitle`, `buildPageviewsUrl`. It also re-exports `wikipediaProject` and `parseRetryAfter`.
 - **Input:** `{project: "pl.wikipedia", article, start, end}` with ISO `YYYY-MM-DD` dates (inclusive). Defaults are `daily` / `all-access` / `user`. Invalid input throws `INVALID_INPUT` before any request is made.
 - **Output:** `PageviewsResult` with the request metadata, sorted `points: {date, views}[]`, `noData` and `warnings[]`.
 - **404 → `noData: true`, not an error.** The same 404 means a missing article, no views, or an unknown project.
@@ -122,7 +122,7 @@ Decisions (agreed with the user): impute missing days as 0 with a flag and count
 
 - **`series.ts` (model):** `PageviewSeries` = `SeriesMeta` (`language` edition, `project`, `article` in API form with underscores, `access`, `agent`) + `start`/`end` + dense `points: {date, views, imputed}[]` (one per day, sorted) + `coverage` + `warnings[]`.
   - `coverage` = `{expectedDays, reportedDays, imputedDays, imputedShare, firstReportedDate, lastReportedDate}`. This is a data-quality input for Stage 6: a late `firstReportedDate` suggests the article was created later.
-  - `buildSeries(meta, start, end, reported, warnings)` validates the points (in range, unique, non-negative integers) and fills gaps. `validateSeries` checks the invariants of an existing series.
+  - `buildSeries(meta, start, end, reported, warnings)` validates the points (in range, unique, non-negative integers) and fills gaps.
   - `totalViews(points)` and `aggregateMonthly(series)` → `{month, views, days, calendarDays, complete, imputedDays}`. Partial first/last months are flagged, never scaled. Stage 5 should build on these rather than duplicate them.
 - **`cache.ts`:** `JsonCache` interface (`get(ns, key)` → `{storedAt, value}` | null, `set(ns, key, value, now)`). `FileCache` stores `<dir>/<ns>/<sha256(key)>.json` with `{version, key, storedAt, value}` and writes atomically (temp file + rename). Corrupt or foreign-version files count as misses; write errors are ignored. `openCache(env)` honours `WIKI_SKILL_CACHE_DIR` (`getCacheDir` in `config.ts`). `CACHE_VERSION` must be bumped when a cached shape changes.
 - **`pageviews.ts`:** `getDailySeries({language, article, start, end, access?, agent?}, {cache, ...http})` → `{series, apiRequests}`.
@@ -285,6 +285,24 @@ Decisions (agreed with the user): each scenario is run by a **fresh subagent** t
 - **Coverage fact:** of 20 editions checked, `English as a second or foreign language` (Q130192) exists only in de, es, tr, id, ko, zh, ar (not pl, uk, cs, pt, it, fr, ru, ja, ro, hu, vi, hi, th). ko/zh/ar titles would be "?" in the PDF (font coverage).
 - **`scenarios.live.test.ts`:** the same flows through `run()` with the fixed period 2024-09-23..2026-09-22, temp cache and output: cs-only + pl missing (cs 6 716 views), the `--title` comparison (pl medium), uk astronomy step 2025-05/06 with edition change < −20 %, `--source uk` resolution, `learning English` → `TOPIC_AMBIGUOUS` with the ESL candidate, and the de/es/tr/pl/uk report (one-page PDF, pl/uk missing).
 
+### Cheap-model evaluation (Stage 12) — `evaluation/haiku-4.5-runbook.md`, `evaluation/haiku-4.5.md`, `evaluation/scripts/`
+
+Decisions (agreed with the user): 3 assignment scenarios + 3 robustness scenarios (ambiguous `Mercury`; follow-up "5 years + PDF" on `Chess` de/fr; nonexistent edition `tlh` with `Yoga` uk/pl); the user runs them, the agent evaluates; raw exports stay in the gitignored `output/haiku-runs/`.
+
+- **Verified Claude Code facts (docs, 2026-09-25, code.claude.com/docs/en/skills.md, commands.md, sessions.md):** skills live in `~/.claude/skills/<name>/` or `.claude/skills/<name>/`; the folder name is the command name; symlinks/junctions are followed; changes are picked up live, but a skills directory created after the session started needs a restart; `${CLAUDE_SKILL_DIR}` is substituted in SKILL.md; Bash runs in the session's working directory (not the skill folder); `/model haiku`, `/cost`, `/export [file]`.
+- **SKILL.md change:** step 0 now says to prefix commands with `cd "${CLAUDE_SKILL_DIR}" && ` (other agents: the folder containing SKILL.md).
+- **Runbook:** setup (build, junction into `~/.claude/skills`, empty working folder `C:\haiku-eval` so Haiku cannot see the source, `/model haiku`), per-scenario procedure (`/clear`, paste the prompt, scripted replies only, no hints, `/cost` + `/export`), six scenarios with expected behavior, a 14-point checklist.
+- **Robustness scenarios probed live (2026-09-25):** `Mercury` → `TOPIC_AMBIGUOUS` (planet, element, Freddie Mercury, …); `Mercury (planet)` → pl `Merkury`, cs `Merkur (planeta)`; `Chess` → de `Schach`, fr `Échecs`, 60 months → low (de ahead in 41 of 59 months); `Yoga` uk/pl/tlh → tlh `language_unavailable` ("edition does not exist"), uk vs pl low (15 of 23 months).
+- **First Haiku run evaluated (2026-09-25):** results in `evaluation/haiku-4.5.md` (source: the session logs `~/.claude/projects/c--haiku-eval/*.jsonl`, which hold prompts, tool calls, CLI output and per-request tokens; `/cost` is not available in the user's Claude Code, so tokens come from the logs). Skill picked automatically 6/6, ambiguity and tlh handled, caveat + confidence level always present, ≈ $0.04–0.08 per scenario ($0.33 total). Failures: own ratios in 3/6 answers ("3.5 times", "55 % higher", a wrong "34.9 % higher"); "per million" read as per residents/per capita; the unstable-ranking reason dropped in 2 comparisons; unrequested PDF; unasked switch to `English language`; PowerShell `&&` errors in 4/6; `npm ci` on every run. Follow-up turns of scenarios 1 and 5 were not sent.
+- **Bug fixed in Stage 12:** `src/cli.ts` compared `import.meta.url` (real path) with `process.argv[1]` (junction/symlink path), so `node <junction>/dist/cli.js` exited 0 with no output. Now `isEntryPoint()` compares realpaths; unit test with a real junction in `tests/cli.test.ts`.
+- **Second Haiku run (same SKILL.md, bug fixed; scenarios 1, 3, 4, 5):** 1 and 4 better (per million read correctly; ranking reason passed on), 5 follow-up correct (`report --months 60`), but own ratios, the unasked `English language` switch, a missing confidence section (3), unrequested PDFs and PowerShell `&&` repeated → treated as instruction problems.
+- **SKILL.md changes applied after run 2:** Hard rules block (no own numbers, quote `relativeToLeaderPct`; copy confidence level + all reasons, unstable = roughly equal; per million = per million edition pageviews; `report` only on request; no topic switch without asking; editions not countries/flags); CLI invoked as `node "${CLAUDE_SKILL_DIR}/dist/cli.js"` (no `cd &&`); npm only if `dist/cli.js` is missing; exact ESL title in the topic example; confidence required in every answer. `tests/skill.test.ts` command regex updated. ≈ 3 100 tokens.
+- **Run 3 (new session, new SKILL.md; scenarios 1, 2, 3, 5):** no own numbers, no per-person reading, confidence + reasons always passed on, right ESL article without a switch, no PowerShell errors (full-path invocation), no `npm ci`; $0.03–0.05 per scenario. Left: an unrequested PDF in scenario 2 (Haiku sets `report: true` in the Skill args before reading SKILL.md) and no caveat in that answer; no PDF in scenario 3 despite "short report". The optional comparison sentence in `findings` is **not needed** (own ratios disappeared without it).
+- **Carried to Stage 13 (done there):** explicit PDF trigger in SKILL.md and the frontmatter `description`; the attention-not-demand sentence in the Hard rules.
+- Generated artifacts always go to `output/` (gitignored).
+- **Evaluation helpers committed:** `evaluation/scripts/parse-session.mjs` (session log → timeline + usage) and `evaluation/scripts/check-session.mjs` (numbers in answers vs CLI output; coarse filter, hits reviewed by hand).
+- Scratchpad helpers (not in the repo): `parse-session.mjs` (log → readable timeline + usage) and `check-session.mjs` (numbers in answers vs CLI output). Worth moving into `evaluation/` if the second run happens.
+
 ### Edge cases and robustness (Stage 13) — `evaluation/edge-cases.md`
 
 Method: every case of the assignment's Stage 13 list was run through the built CLI against the live APIs (a scratchpad script printing a compact summary per envelope); cases that cannot be forced live are unit-tested with the fake Wikimedia. The full matrix (before/after) is in `evaluation/edge-cases.md`.
@@ -316,25 +334,26 @@ Changes:
   - live: case-only title and typo suggestion (`resolver.live.test.ts`).
 - **Visual check (2026-09-25):** the zero-view uk `ChatGPT` 2021 report and the en/uk/ga comparison PDF were regenerated and inspected (`output/stage13/`, gitignored).
 
-## Planned design (not yet implemented; revisit in each stage)
+### Final cleanup (Stage 14)
 
-### Cheap-model evaluation (Stage 12) — `evaluation/haiku-4.5-runbook.md`, `evaluation/haiku-4.5.md`, `evaluation/scripts/`
+Decisions (agreed with the user): add an MIT `LICENSE` (Danil Deineka, 2026); keep `prompts/master_rules.md` with a tidied layout (wording unchanged; a note says it was prepared with ChatGPT); mention ChatGPT in the README's AI section.
 
-Decisions (agreed with the user): 3 assignment scenarios + 3 robustness scenarios (ambiguous `Mercury`; follow-up "5 years + PDF" on `Chess` de/fr; nonexistent edition `tlh` with `Yoga` uk/pl); the user runs them, the agent evaluates; raw exports stay in the gitignored `output/haiku-runs/`.
+- **Dead code removed:**
+  - `PageviewsErrorCode` and the `PageviewsApiError` alias (tests use `WikimediaApiError`);
+  - `validateSeries` (never called outside tests; `buildSeries` validates);
+  - an unused `daysInclusive` import.
 
-- **Verified Claude Code facts (docs, 2026-09-25, code.claude.com/docs/en/skills.md, commands.md, sessions.md):** skills live in `~/.claude/skills/<name>/` or `.claude/skills/<name>/`; the folder name is the command name; symlinks/junctions are followed; changes are picked up live, but a skills directory created after the session started needs a restart; `${CLAUDE_SKILL_DIR}` is substituted in SKILL.md; Bash runs in the session's working directory (not the skill folder); `/model haiku`, `/cost`, `/export [file]`.
-- **SKILL.md change:** step 0 now says to prefix commands with `cd "${CLAUDE_SKILL_DIR}" && ` (other agents: the folder containing SKILL.md).
-- **Runbook:** setup (build, junction into `~/.claude/skills`, empty working folder `C:\haiku-eval` so Haiku cannot see the source, `/model haiku`), per-scenario procedure (`/clear`, paste the prompt, scripted replies only, no hints, `/cost` + `/export`), six scenarios with expected behavior, a 14-point checklist.
-- **Robustness scenarios probed live (2026-09-25):** `Mercury` → `TOPIC_AMBIGUOUS` (planet, element, Freddie Mercury, …); `Mercury (planet)` → pl `Merkury`, cs `Merkur (planeta)`; `Chess` → de `Schach`, fr `Échecs`, 60 months → low (de ahead in 41 of 59 months); `Yoga` uk/pl/tlh → tlh `language_unavailable` ("edition does not exist"), uk vs pl low (15 of 23 months).
-- **First Haiku run evaluated (2026-09-25):** results in `evaluation/haiku-4.5.md` (source: the session logs `~/.claude/projects/c--haiku-eval/*.jsonl`, which hold prompts, tool calls, CLI output and per-request tokens; `/cost` is not available in the user's Claude Code, so tokens come from the logs). Skill picked automatically 6/6, ambiguity and tlh handled, caveat + confidence level always present, ≈ $0.04–0.08 per scenario ($0.33 total). Failures: own ratios in 3/6 answers ("3.5 times", "55 % higher", a wrong "34.9 % higher"); "per million" read as per residents/per capita; the unstable-ranking reason dropped in 2 comparisons; unrequested PDF; unasked switch to `English language`; PowerShell `&&` errors in 4/6; `npm ci` on every run. Follow-up turns of scenarios 1 and 5 were not sent.
-- **Bug fixed in Stage 12:** `src/cli.ts` compared `import.meta.url` (real path) with `process.argv[1]` (junction/symlink path), so `node <junction>/dist/cli.js` exited 0 with no output. Now `isEntryPoint()` compares realpaths; unit test with a real junction in `tests/cli.test.ts`.
-- **Second Haiku run (same SKILL.md, bug fixed; scenarios 1, 3, 4, 5):** 1 and 4 better (per million read correctly; ranking reason passed on), 5 follow-up correct (`report --months 60`), but own ratios, the unasked `English language` switch, a missing confidence section (3), unrequested PDFs and PowerShell `&&` repeated → treated as instruction problems.
-- **SKILL.md changes applied after run 2:** Hard rules block (no own numbers, quote `relativeToLeaderPct`; copy confidence level + all reasons, unstable = roughly equal; per million = per million edition pageviews; `report` only on request; no topic switch without asking; editions not countries/flags); CLI invoked as `node "${CLAUDE_SKILL_DIR}/dist/cli.js"` (no `cd &&`); npm only if `dist/cli.js` is missing; exact ESL title in the topic example; confidence required in every answer. `tests/skill.test.ts` command regex updated. ≈ 3 100 tokens.
-- **Run 3 (new session, new SKILL.md; scenarios 1, 2, 3, 5):** no own numbers, no per-person reading, confidence + reasons always passed on, right ESL article without a switch, no PowerShell errors (full-path invocation), no `npm ci`; $0.03–0.05 per scenario. Left: an unrequested PDF in scenario 2 (Haiku sets `report: true` in the Skill args before reading SKILL.md) and no caveat in that answer; no PDF in scenario 3 despite "short report". The optional comparison sentence in `findings` is **not needed** (own ratios disappeared without it).
-- **Carried to Stage 13 (done there):** explicit PDF trigger in SKILL.md and the frontmatter `description`; the attention-not-demand sentence in the Hard rules.
-- **Evaluation helpers committed:** `evaluation/scripts/parse-session.mjs` (session log → timeline + usage) and `evaluation/scripts/check-session.mjs` (numbers in answers vs CLI output; coarse filter, hits reviewed by hand).
-- Scratchpad helpers (not in the repo): `parse-session.mjs` (log → readable timeline + usage) and `check-session.mjs` (numbers in answers vs CLI output). Worth moving into `evaluation/` if the second run happens.
-- Generated artifacts go to `output/` (gitignored).
+  `tsconfig.json` now has `noUnusedLocals` and `noUnusedParameters`. `generateReport` stays (a documented library entry point, used by the report tests).
+- **Dependencies:** all 5 runtime dependencies and all `@types` are used; `npm ci` reports 0 vulnerabilities.
+- **Error messages:** four were made actionable:
+  - more than 20 languages: split into several runs;
+  - explicit title for a language that is not a target: add the language or remove the title;
+  - invalid language code: example codes;
+  - no common period: choose one all editions cover.
+
+  The `TOPIC_NOT_FOUND` grammar was fixed ("a title on en.wikipedia").
+- **README rewritten** for a developer or reviewer who has never seen the project: quick start, installing in Claude Code, how the agent uses the skill, the CLI reference and output contract, architecture (diagram, folders, design decisions), methods and the confidence model, configuration, testing and evaluation, AI-assisted development and how the AI output was validated, how to develop the skill further (the assignment asks for this), limitations, license.
+- **Reproducibility check:** a fresh copy of the tracked files outside OneDrive went through `npm ci`, `build`, `typecheck` and 268 tests, and made a live `analyze` call.
 
 ## Current layout
 
@@ -390,7 +409,9 @@ evaluation/edge-cases.md       Stage 13: edge-case matrix (live CLI runs + unit-
 evaluation/haiku-4.5-runbook.md  Stage 12: how to run the six scenarios with Haiku 4.5 in Claude Code, expected behavior, checklist
 evaluation/haiku-4.5.md        Stage 12: results of three Haiku runs, bug found, cost, SKILL.md changes, remaining issues
 evaluation/scripts/*.mjs       session-log timeline (parse-session) and number check (check-session) used for the evaluation
-tsconfig.json                  strict type-check config (src + tests + configs), noEmit
+LICENSE                        MIT
+prompts/master_rules.md        the development prompt (prepared with ChatGPT; layout tidied in Stage 14)
+tsconfig.json                  strict type-check config (src + tests + configs, unused-code checks), noEmit
 tsconfig.build.json            build config (src → dist)
 vitest.config.ts               unit tests; excludes tests/integration
 vitest.integration.config.ts   live tests only, sequential, 60 s timeout
@@ -435,4 +456,4 @@ vitest.integration.config.ts   live tests only, sequential, 60 s timeout
 
 ## Remaining work
 
-Stage 14 (see the table above).
+None required. Optional next steps are listed in README → "Developing the skill further" (topic clusters, concurrency with a rate limiter, seasonality modelling, per-year rate on short periods, MCP server, CJK fonts).

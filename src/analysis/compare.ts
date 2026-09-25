@@ -43,7 +43,7 @@ export function compareLanguages(
   if (inputs.length === 0) throw new RangeError('Nothing to compare.');
   const start = inputs.map((i) => i.series.start).reduce((a, b) => (a > b ? a : b));
   const end = inputs.map((i) => i.series.end).reduce((a, b) => (a < b ? a : b));
-  if (start > end) throw new RangeError('The series have no period in common.');
+  if (start > end) throw new RangeError('The series have no period in common; choose a period that all editions cover.');
 
   const warnings: string[] = [];
   for (const { series } of inputs) {

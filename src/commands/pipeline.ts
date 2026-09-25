@@ -132,7 +132,7 @@ function unresolvedError(resolution: ResolveResult, missing: Analysis['missing']
   if (source.status === 'not_found') {
     return new CliError(
       'TOPIC_NOT_FOUND',
-      `No ${source.language}.wikipedia article matches "${resolution.topic}". If the topic is written in another language, re-run with --source <that language code> (e.g. --source uk) or give the topic as a ${source.language}.wikipedia title. Otherwise ask the user to confirm one of the candidates (search results, not verified) and re-run with it as --topic.`,
+      `No ${source.language}.wikipedia article matches "${resolution.topic}". If the topic is written in another language, re-run with --source <that language code> (e.g. --source uk) or give the topic as a title on ${source.language}.wikipedia. Otherwise ask the user to confirm one of the candidates (search results, not verified) and re-run with it as --topic.`,
       { candidates },
     );
   }

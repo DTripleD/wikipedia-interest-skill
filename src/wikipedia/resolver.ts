@@ -181,12 +181,12 @@ function validateRequest(request: ResolveRequest) {
   const sourceEdition = toEdition(request.sourceLanguage ?? 'en');
   const targets = [...new Set(request.languages.map(toEdition))];
   if (targets.length === 0) throw invalid('At least one target language is required.');
-  if (targets.length > MAX_LANGUAGES) throw invalid(`At most ${MAX_LANGUAGES} languages can be resolved at once.`);
+  if (targets.length > MAX_LANGUAGES) throw invalid(`At most ${MAX_LANGUAGES} languages can be resolved at once; split them into several runs.`);
 
   const titles: Record<string, string> = {};
   for (const [lang, title] of Object.entries(request.titles ?? {})) {
     const edition = toEdition(lang);
-    if (!targets.includes(edition)) throw invalid(`Explicit title given for "${lang}", which is not among the target languages.`);
+    if (!targets.includes(edition)) throw invalid(`An explicit title is given for "${lang}", which is not among the target languages: add "${lang}" to the languages or remove its title.`);
     if (title.trim().length === 0) throw invalid(`Explicit title for "${lang}" is empty.`);
     titles[edition] = title.trim();
   }

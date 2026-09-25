@@ -10,7 +10,7 @@
  * - Recent days that are not published yet are NOT imputed: the fetch layer trims them
  *   off the end of the range before building the series (see pageviews.ts).
  */
-import { addDays, daysInMonth, daysInclusive, eachDay, isIsoDate } from '../dates.js';
+import { addDays, daysInMonth, eachDay, isIsoDate } from '../dates.js';
 import type { Access, Agent, PageviewPoint } from '../wikipedia/api.js';
 
 export interface DailyPoint {
@@ -112,21 +112,6 @@ export function buildSeries(
     },
     warnings: [...warnings],
   };
-}
-
-/** Checks the invariants of a series built elsewhere (e.g. loaded from a file). Throws on violation. */
-export function validateSeries(series: PageviewSeries): void {
-  const { start, end, points } = series;
-  if (!isIsoDate(start) || !isIsoDate(end) || start > end) throw new RangeError(`Invalid series range ${start}..${end}.`);
-  if (points.length !== daysInclusive(start, end)) {
-    throw new RangeError(`Series has ${points.length} points but ${start}..${end} has ${daysInclusive(start, end)} days.`);
-  }
-  const days = eachDay(start, end);
-  points.forEach((p, i) => {
-    if (p.date !== days[i]) throw new RangeError(`Expected ${days[i]} at position ${i}, got ${p.date}.`);
-    if (!Number.isInteger(p.views) || p.views < 0) throw new RangeError(`Invalid views ${p.views} on ${p.date}.`);
-    if (p.imputed && p.views !== 0) throw new RangeError(`Imputed day ${p.date} must have 0 views.`);
-  });
 }
 
 /** The part of a series within [start, end] (must lie inside it), with coverage recomputed. */

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { WikimediaApiError } from '../../src/wikipedia/http.js';
 import {
-  PageviewsApiError,
   buildPageviewsUrl,
   buildProjectPageviewsUrl,
   fetchPageviews,
@@ -67,9 +67,9 @@ async function expectError(promise: Promise<unknown>, code: string) {
     () => null,
     (e: unknown) => e,
   );
-  expect(err).toBeInstanceOf(PageviewsApiError);
-  expect((err as PageviewsApiError).code).toBe(code);
-  return err as PageviewsApiError;
+  expect(err).toBeInstanceOf(WikimediaApiError);
+  expect((err as WikimediaApiError).code).toBe(code);
+  return err as WikimediaApiError;
 }
 
 describe('helpers', () => {
@@ -79,7 +79,7 @@ describe('helpers', () => {
     expect(wikipediaProject('zh-min-nan')).toBe('zh-min-nan.wikipedia');
     expect(wikipediaProject('simple')).toBe('simple.wikipedia');
     for (const bad of ['', 'p l', 'pl.wikipedia', '-pl', 'pl_PL']) {
-      expect(() => wikipediaProject(bad), bad).toThrow(PageviewsApiError);
+      expect(() => wikipediaProject(bad), bad).toThrow(WikimediaApiError);
     }
   });
 

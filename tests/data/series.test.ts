@@ -5,7 +5,6 @@ import {
   buildSeries,
   sliceSeries,
   totalViews,
-  validateSeries,
   type SeriesMeta,
 } from '../../src/data/series.js';
 
@@ -63,21 +62,6 @@ describe('buildSeries', () => {
     expect(() => buildSeries(META, '2024-01-01', '2024-01-02', [{ date: '2024-01-01', views: -1 }])).toThrow(/Invalid views/);
     expect(() => buildSeries(META, '2024-01-01', '2024-01-02', [{ date: '2024-01-01', views: 1.5 }])).toThrow(/Invalid views/);
     expect(() => buildSeries(META, '2024-01-02', '2024-01-01', [])).toThrow(/range/);
-  });
-});
-
-describe('validateSeries', () => {
-  it('accepts a built series', () => {
-    expect(() => validateSeries(buildSeries(META, '2024-01-01', '2024-01-31', []))).not.toThrow();
-  });
-
-  it('detects gaps, disorder and inconsistent imputed points', () => {
-    const s = buildSeries(META, '2024-01-01', '2024-01-03', [{ date: '2024-01-02', views: 5 }]);
-    expect(() => validateSeries({ ...s, points: s.points.slice(1) })).toThrow(/points/);
-    expect(() => validateSeries({ ...s, points: [s.points[1]!, s.points[0]!, s.points[2]!] })).toThrow(/Expected/);
-    expect(() =>
-      validateSeries({ ...s, points: s.points.map((p) => (p.imputed ? { ...p, views: 3 } : p)) }),
-    ).toThrow(/Imputed/);
   });
 });
 
